@@ -2,8 +2,8 @@ import {Metadata} from "next";
 import {LoginForm} from "@/components/auth/LoginForm";
 
 export const metadata: Metadata = {
-  title: "Login | SAIVD",
-  description: "Login to your SAIVD account",
+  title: "Login | SAIVD Viewer",
+  description: "Login to your SAIVD Viewer account",
 };
 
 export default function LoginPage() {

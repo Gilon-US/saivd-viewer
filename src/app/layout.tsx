@@ -15,8 +15,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "SAIVD App",
-  description: "Upload your files to Wasabi Cloud Storage",
+  title: "SAIVD Viewer",
+  description: "Manage and view your video library",
 };
 
 export default function RootLayout({

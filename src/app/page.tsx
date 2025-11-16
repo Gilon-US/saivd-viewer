@@ -23,8 +23,8 @@ export default function Home() {
     <div className="min-h-screen bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
       <div className="max-w-4xl mx-auto">
         <div className="text-center mb-12">
-          <h1 className="text-4xl font-bold text-gray-900 mb-4">SAIVD App</h1>
-          <p className="text-xl text-gray-600">Upload your files to Wasabi Cloud Storage</p>
+          <h1 className="text-4xl font-bold text-gray-900 mb-4">SAIVD Viewer</h1>
+          <p className="text-xl text-gray-600">Manage and view your video library</p>
         </div>
 
         {/* Show login button if not authenticated */}
