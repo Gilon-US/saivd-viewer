@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/utils/supabase/server';
 import { HeadObjectCommand } from '@aws-sdk/client-s3';
 import { wasabiClient, WASABI_BUCKET } from '@/lib/wasabi';
+import { generatePublicVideoUrl } from '@/lib/wasabi-urls';
 
 /**
  * POST /api/videos/confirm
@@ -62,9 +63,9 @@ export async function POST(request: NextRequest) {
       );
     }
     
-    // Generate URLs for the video
-    // In a production environment, you would use a proper CDN URL or signed URL
-    const videoUrl = `https://${WASABI_BUCKET}.s3.wasabisys.com/${key}`;
+    // Generate URLs for the video using the proper Wasabi endpoint
+    // The endpoint format varies by region (e.g., s3.us-east-1.wasabisys.com)
+    const videoUrl = generatePublicVideoUrl(key);
     
     // Thumbnail generation is now handled in the browser via preview_thumbnail_data
     // Server-side thumbnail generation can be added later as an enhancement
