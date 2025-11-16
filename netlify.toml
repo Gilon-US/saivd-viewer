@@ -4,26 +4,10 @@
 
 [build.environment]
   NODE_VERSION = "18"
-
-# Configure secrets scanning to allow public environment variables
-# NEXT_PUBLIC_* variables are intentionally public and bundled into the client
-[secrets]
-  # Allow NEXT_PUBLIC_* variables to be in build output (they're public by design)
-  # WASABI_REGION and WASABI_BUCKET_NAME are not sensitive (standard region names and bucket names are public)
-  omit_keys = [
-    "NEXT_PUBLIC_SUPABASE_URL",
-    "NEXT_PUBLIC_SUPABASE_ANON_KEY",
-    "NEXT_PUBLIC_APP_URL",
-    "WASABI_REGION",
-    "WASABI_BUCKET_NAME"
-  ]
-  
-  # Omit build output directories from secret scanning
-  omit_paths = [
-    ".next/**",
-    ".netlify/**",
-    "node_modules/**"
-  ]
+  # Configure secrets scanning via environment variables
+  # These must be set as environment variables in Netlify UI, not in this file
+  SECRETS_SCAN_OMIT_KEYS = "NEXT_PUBLIC_SUPABASE_URL,NEXT_PUBLIC_SUPABASE_ANON_KEY,NEXT_PUBLIC_APP_URL,WASABI_REGION,WASABI_BUCKET_NAME"
+  SECRETS_SCAN_OMIT_PATHS = ".next/**,.netlify/**,node_modules/**,docs/**,*.md"
 
 # Redirect rules (if needed)
 [[redirects]]

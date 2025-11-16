@@ -26,24 +26,18 @@ The detected "secrets" were **NOT actual security vulnerabilities**:
 
 ### 1. Created `netlify.toml` Configuration
 
-Added Netlify configuration to properly handle secret scanning:
+Added Netlify configuration with environment variables to control secret scanning:
 
 ```toml
-[secrets]
-  omit_keys = [
-    "NEXT_PUBLIC_SUPABASE_URL",      # Public by design
-    "NEXT_PUBLIC_SUPABASE_ANON_KEY",  # Public by design (anon key)
-    "NEXT_PUBLIC_APP_URL",            # Public URL
-    "WASABI_REGION",                  # Standard region name
-    "WASABI_BUCKET_NAME"              # Bucket name (public info)
-  ]
-  
-  omit_paths = [
-    ".next/**",         # Build output
-    ".netlify/**",      # Netlify build artifacts
-    "node_modules/**"   # Dependencies
-  ]
+[build.environment]
+  SECRETS_SCAN_OMIT_KEYS = "NEXT_PUBLIC_SUPABASE_URL,NEXT_PUBLIC_SUPABASE_ANON_KEY,NEXT_PUBLIC_APP_URL,WASABI_REGION,WASABI_BUCKET_NAME"
+  SECRETS_SCAN_OMIT_PATHS = ".next/**,.netlify/**,node_modules/**,docs/**,*.md"
 ```
+
+**Important:** You must ALSO set these in Netlify UI:
+- Go to Site Settings → Environment Variables
+- Add `SECRETS_SCAN_OMIT_KEYS` with the value above
+- Add `SECRETS_SCAN_OMIT_PATHS` with the value above
 
 ### 2. Updated `.gitignore`
 
