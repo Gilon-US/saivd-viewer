@@ -6,8 +6,8 @@ import {Button} from "@/components/ui/button";
 import {VideoIcon, HardDriveIcon, UploadIcon} from "lucide-react";
 
 export const metadata: Metadata = {
-  title: "Dashboard | SAIVD",
-  description: "SAIVD Dashboard",
+  title: "Dashboard | SAIVD Viewer",
+  description: "SAIVD Viewer Dashboard",
 };
 
 export default function DashboardPage() {
