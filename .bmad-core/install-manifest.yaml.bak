@@ -1,5 +1,5 @@
-version: 4.44.3
-installed_at: '2025-11-16T15:54:02.615Z'
+version: 4.44.1
+installed_at: '2025-10-12T15:43:29.857Z'
 install_type: full
 agent: null
 ides_setup:
@@ -12,11 +12,8 @@ files:
   - path: .bmad-core/user-guide.md
     hash: f83fb2a5bc8bfe4b
     modified: false
-  - path: .bmad-core/install-manifest.yaml.bak
-    hash: d96a085f8a7976e5
-    modified: false
   - path: .bmad-core/install-manifest.yaml
-    hash: d96a085f8a7976e5
+    hash: 6d96ae1bbb1ca362
     modified: false
   - path: .bmad-core/enhanced-ide-development-workflow.md
     hash: 39beb3516c070e2b

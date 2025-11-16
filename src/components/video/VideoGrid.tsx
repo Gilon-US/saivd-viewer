@@ -69,14 +69,6 @@ export function VideoGrid({
     });
   };
 
-  const handleCreateWatermark = (video: Video) => {
-    // TODO: Implement watermark creation API call
-    toast({
-      title: 'Creating watermarked version',
-      description: `Starting watermark process for "${video.filename}"`,
-    });
-  };
-
   const handleDeleteClick = (video: Video) => {
     setDeleteDialog({
       isOpen: true,
@@ -185,7 +177,7 @@ export function VideoGrid({
     status: v.status
   })));
 
-  // Video pairs grid - responsive flex layout
+  // Video grid - responsive flex layout
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap gap-6 justify-start">
@@ -194,7 +186,7 @@ export function VideoGrid({
             <CardContent className="p-4">
               <div className="mb-3 flex items-start justify-between">
                 <div className="flex-1 min-w-0">
-                  <h3 className="font-medium text-lg truncate max-w-[450px]" title={video.filename}>
+                  <h3 className="font-medium text-lg truncate max-w-[240px]" title={video.filename}>
                     {video.filename}
                   </h3>
                   <p className="text-sm text-gray-500 dark:text-gray-400">
@@ -212,97 +204,33 @@ export function VideoGrid({
                 </Button>
               </div>
               
-              {/* Video pair container */}
-              <div className="flex gap-4 justify-start items-start">
-                {/* Original video */}
-                <div className="space-y-2 flex-shrink-0">
-                  <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                    Original
-                  </h4>
-                  <div 
-                    className="w-60 max-w-[240px] aspect-video relative bg-gray-100 dark:bg-gray-800 rounded-lg overflow-hidden cursor-pointer hover:opacity-90 transition-opacity"
-                    onClick={() => handleVideoClick(video.original_url)}
-                  >
-                    {video.preview_thumbnail_data ? (
-                      // Using <img> for base64 data URLs is appropriate since Next.js Image component
-                      // is designed for external URLs and file paths, not data URLs
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img 
-                        src={video.preview_thumbnail_data} 
-                        alt={`${video.filename} - Browser Generated Preview`}
-                        className="object-cover w-full h-full"
-                      />
-                    ) : video.original_thumbnail_url && !video.original_thumbnail_url.includes('placeholder-video-thumbnail') ? (
-                      <Image 
-                        src={video.original_thumbnail_url} 
-                        alt={`${video.filename} - Server Thumbnail`}
-                        className="object-cover"
-                        fill
-                        sizes="240px"
-                      />
-                    ) : (
-                      <div className="w-full h-full flex items-center justify-center bg-gray-200 dark:bg-gray-700">
-                        <span className="text-gray-400 text-xs">No preview</span>
-                      </div>
-                    )}
+              {/* Video thumbnail */}
+              <div 
+                className="w-60 max-w-[240px] aspect-video relative bg-gray-100 dark:bg-gray-800 rounded-lg overflow-hidden cursor-pointer hover:opacity-90 transition-opacity"
+                onClick={() => handleVideoClick(video.original_url)}
+              >
+                {video.preview_thumbnail_data ? (
+                  // Using <img> for base64 data URLs is appropriate since Next.js Image component
+                  // is designed for external URLs and file paths, not data URLs
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img 
+                    src={video.preview_thumbnail_data} 
+                    alt={`${video.filename} - Preview`}
+                    className="object-cover w-full h-full"
+                  />
+                ) : video.original_thumbnail_url && !video.original_thumbnail_url.includes('placeholder-video-thumbnail') ? (
+                  <Image 
+                    src={video.original_thumbnail_url} 
+                    alt={`${video.filename} - Thumbnail`}
+                    className="object-cover"
+                    fill
+                    sizes="240px"
+                  />
+                ) : (
+                  <div className="w-full h-full flex items-center justify-center bg-gray-200 dark:bg-gray-700">
+                    <span className="text-gray-400 text-xs">No preview</span>
                   </div>
-                </div>
-
-                {/* Watermarked version */}
-                <div className="space-y-2 flex-shrink-0">
-                  <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                    Watermarked
-                  </h4>
-                  <div className="w-60 max-w-[240px] aspect-video relative bg-gray-100 dark:bg-gray-800 rounded-lg overflow-hidden">
-                    {video.status === 'processed' && video.processed_thumbnail_url ? (
-                      <div 
-                        className="w-full h-full cursor-pointer hover:opacity-90 transition-opacity"
-                        onClick={() => handleVideoClick(video.processed_url || video.original_url)}
-                      >
-                        <Image 
-                          src={video.processed_thumbnail_url} 
-                          alt={`${video.filename} - Watermarked`}
-                          className="object-cover"
-                          fill
-                          sizes="240px"
-                        />
-                      </div>
-                    ) : video.status === 'processing' ? (
-                      <div className="w-full h-full flex flex-col items-center justify-center bg-gray-200 dark:bg-gray-700">
-                        <LoadingSpinner size="sm" />
-                        <span className="text-gray-400 text-xs mt-2">Processing...</span>
-                      </div>
-                    ) : video.status === 'failed' ? (
-                      <div className="w-full h-full flex flex-col items-center justify-center bg-red-50 dark:bg-red-900/20">
-                        <span className="text-red-500 text-xs text-center">
-                          Processing failed
-                        </span>
-                        <Button 
-                          size="sm" 
-                          variant="outline" 
-                          className="mt-2 text-xs h-6"
-                          onClick={() => handleCreateWatermark(video)}
-                        >
-                          Retry
-                        </Button>
-                      </div>
-                    ) : (
-                      <div className="w-full h-full flex flex-col items-center justify-center bg-gray-200 dark:bg-gray-700">
-                        <span className="text-gray-400 text-xs text-center mb-2">
-                          No watermarked version
-                        </span>
-                        <Button 
-                          size="sm" 
-                          variant="outline" 
-                          className="text-xs h-6"
-                          onClick={() => handleCreateWatermark(video)}
-                        >
-                          Create watermarked version
-                        </Button>
-                      </div>
-                    )}
-                  </div>
-                </div>
+                )}
               </div>
             </CardContent>
           </Card>
