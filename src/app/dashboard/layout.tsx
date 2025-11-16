@@ -16,7 +16,7 @@ export default function DashboardLayout({children}: DashboardLayoutProps) {
           <div className="container mx-auto px-4 py-4 flex items-center justify-between">
             <div className="flex items-center space-x-4">
               <Link href="/dashboard" className="text-xl font-bold">
-                SAIVD
+                SAIVD Viewer
               </Link>
               <nav className="hidden md:flex space-x-4">
                 <Link href="/dashboard" className="px-3 py-2 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700">
