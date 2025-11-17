@@ -38,7 +38,18 @@ export async function generatePresignedVideoUrl(
  */
 export function generatePublicVideoUrl(key: string): string {
   const endpoint = process.env.WASABI_ENDPOINT?.replace('https://', '') || 's3.wasabisys.com';
-  return `https://${WASABI_BUCKET}.${endpoint}/${key}`;
+  const url = `https://${WASABI_BUCKET}.${endpoint}/${key}`;
+  
+  // Debug: Log URL generation details
+  console.log('generatePublicVideoUrl:', {
+    key,
+    endpoint_env: process.env.WASABI_ENDPOINT,
+    endpoint_used: endpoint,
+    bucket: WASABI_BUCKET,
+    generated_url: url,
+  });
+  
+  return url;
 }
 
 /**

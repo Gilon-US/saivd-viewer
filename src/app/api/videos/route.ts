@@ -76,6 +76,14 @@ export async function GET(request: NextRequest) {
       );
     }
     
+    // Debug: Log video data to verify original_url is present
+    console.log('Fetched videos:', videos?.map(v => ({
+      id: v.id,
+      filename: v.filename,
+      original_url: v.original_url,
+      has_original_url: !!v.original_url,
+    })));
+    
     return NextResponse.json({
       success: true,
       data: {

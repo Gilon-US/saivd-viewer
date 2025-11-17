@@ -67,6 +67,15 @@ export async function POST(request: NextRequest) {
     // The endpoint format varies by region (e.g., s3.us-east-1.wasabisys.com)
     const videoUrl = generatePublicVideoUrl(key);
     
+    // Debug: Log the generated URL and environment config
+    console.log('Upload confirmation:', {
+      key,
+      filename,
+      wasabi_endpoint: process.env.WASABI_ENDPOINT,
+      wasabi_bucket: WASABI_BUCKET,
+      generated_url: videoUrl,
+    });
+    
     // Thumbnail generation is now handled in the browser via preview_thumbnail_data
     // Server-side thumbnail generation can be added later as an enhancement
     const thumbnailUrl = null;
@@ -87,6 +96,16 @@ export async function POST(request: NextRequest) {
       })
       .select()
       .single();
+      
+    // Debug: Log what was actually saved to the database
+    if (video) {
+      console.log('Saved to database:', {
+        id: video.id,
+        filename: video.filename,
+        original_url: video.original_url,
+        url_matches: video.original_url === videoUrl,
+      });
+    }
       
     if (error) {
       console.error('Error storing video metadata:', error);

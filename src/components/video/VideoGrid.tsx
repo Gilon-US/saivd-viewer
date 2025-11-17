@@ -169,9 +169,12 @@ export function VideoGrid({
     );
   }
 
-  // Debug: Log video data to see what thumbnails are available
-  console.log('VideoGrid videos:', videos.map(v => ({
+  // Debug: Log video data to see what URLs and thumbnails are available
+  console.log('VideoGrid received videos:', videos.map(v => ({
+    id: v.id,
     filename: v.filename,
+    original_url: v.original_url,
+    has_original_url: !!v.original_url,
     hasPreviewThumbnail: !!v.preview_thumbnail_data,
     originalThumbnailUrl: v.original_thumbnail_url,
     status: v.status
