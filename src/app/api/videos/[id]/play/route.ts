@@ -12,9 +12,9 @@ import {generatePublicVideoUrl, extractKeyFromUrl} from "@/lib/wasabi-urls";
  * - Treats videos.original_url as the stable object key (new behavior)
  *   - For legacy rows where original_url is a full URL, extracts the key
  */
-export async function GET(_request: NextRequest, {params}: {params: {id: string}}) {
+export async function GET(_request: NextRequest, context: {params: Promise<{id: string}>}) {
   try {
-    const videoId = params.id;
+    const {id: videoId} = await context.params;
 
     const supabase = await createClient();
     const {data: authData} = await supabase.auth.getUser();
