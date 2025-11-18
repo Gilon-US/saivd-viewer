@@ -1,6 +1,6 @@
 import {NextRequest, NextResponse} from "next/server";
 import {createClient} from "@/utils/supabase/server";
-import {generatePublicVideoUrl, extractKeyFromUrl} from "@/lib/wasabi-urls";
+import {generatePresignedVideoUrl, extractKeyFromUrl} from "@/lib/wasabi-urls";
 
 /**
  * GET /api/videos/[id]/play
@@ -56,9 +56,8 @@ export async function GET(_request: NextRequest, context: {params: Promise<{id: 
       );
     }
 
-    // For now we generate a public URL from the key.
-    // If the bucket is private later, this can be swapped to generatePresignedVideoUrl(key).
-    const playbackUrl = generatePublicVideoUrl(key);
+    // Generate a presigned URL from the key so that objects can remain private in Wasabi.
+    const playbackUrl = await generatePresignedVideoUrl(key);
 
     // Debug: log what we are returning to the client
     console.log("Playback URL generated:", {
