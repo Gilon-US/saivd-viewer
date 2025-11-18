@@ -64,6 +64,13 @@ export function VideoGrid({videos, isLoading, error, onRefresh, onOpenUploadModa
         throw new Error(data.error?.message || "Failed to generate playback URL");
       }
 
+      // Debug: log the playback URL we are about to use
+      console.log("Opening video with playback URL:", {
+        id: video.id,
+        filename: video.filename,
+        playbackUrl: data.data.playbackUrl,
+      });
+
       setVideoPlayer({
         isOpen: true,
         videoUrl: data.data.playbackUrl,

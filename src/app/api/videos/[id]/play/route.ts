@@ -60,6 +60,15 @@ export async function GET(_request: NextRequest, context: {params: Promise<{id: 
     // If the bucket is private later, this can be swapped to generatePresignedVideoUrl(key).
     const playbackUrl = generatePublicVideoUrl(key);
 
+    // Debug: log what we are returning to the client
+    console.log("Playback URL generated:", {
+      videoId,
+      userId: authData.user.id,
+      original_url: video.original_url,
+      resolved_key: key,
+      playbackUrl,
+    });
+
     return NextResponse.json({
       success: true,
       data: {
