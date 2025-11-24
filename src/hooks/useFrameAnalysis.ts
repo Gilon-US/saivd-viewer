@@ -87,7 +87,20 @@ export function useFrameAnalysis(
       context.drawImage(video, 0, 0, canvas.width, canvas.height);
 
       // Get image data
-      const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+      let imageData: ImageData;
+      try {
+        imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+      } catch (error) {
+        // This can happen if the canvas is tainted by cross-origin video content.
+        console.error("Error reading frame pixels (likely cross-origin video):", error);
+        setQrCodeUrl(null);
+        // Stop further analysis attempts for this playback to avoid spamming errors.
+        if (animationFrameRef.current !== null) {
+          cancelAnimationFrame(animationFrameRef.current);
+          animationFrameRef.current = null;
+        }
+        return;
+      }
 
       // Prepare frame data
       const frameData: FrameData = {

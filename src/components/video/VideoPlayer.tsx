@@ -20,6 +20,12 @@ export function VideoPlayer({videoUrl, onClose, isOpen}: VideoPlayerProps) {
   // Frame analysis hook - returns a QR code URL for the current frame (or null if none)
   const {qrCodeUrl} = useFrameAnalysis(videoRef, isPlaying);
 
+  // TEMP: For testing, fall back to the hardcoded QR URL if analysis doesn't provide one
+  const effectiveQrUrl = qrCodeUrl || "https://saivd.netlify.app/profile/1/qr";
+
+  // Debug: log what QR URL is being used
+  console.log("VideoPlayer QR overlay URL:", {qrCodeUrl, effectiveQrUrl});
+
   useEffect(() => {
     if (!isOpen) {
       setIsPlaying(false);
@@ -102,13 +108,13 @@ export function VideoPlayer({videoUrl, onClose, isOpen}: VideoPlayerProps) {
             onEnded={() => setIsPlaying(false)}
           />
 
-          {/* QR code overlay - only shows when qrCodeUrl is a non-empty string */}
-          {qrCodeUrl && (
+          {/* QR code overlay - only shows when effectiveQrUrl is a non-empty string */}
+          {effectiveQrUrl && (
             <div className="absolute inset-0 pointer-events-none">
               <div className="absolute top-4 left-4">
                 {/* Transparent overlay container with only the QR PNG visible */}
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={qrCodeUrl} alt="QR code overlay" className="w-24 h-24 object-contain" />
+                <img src={effectiveQrUrl} alt="QR code overlay" className="w-24 h-24 object-contain" />
               </div>
             </div>
           )}
