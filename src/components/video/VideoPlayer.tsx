@@ -1,8 +1,8 @@
-'use client';
+"use client";
 
-import { useEffect, useRef, useState } from 'react';
-import { X, Play, Pause, Volume2, VolumeX, Maximize } from 'lucide-react';
-import { useFrameAnalysis } from '@/hooks/useFrameAnalysis';
+import {useEffect, useRef, useState} from "react";
+import {X, Play, Pause, Volume2, VolumeX, Maximize} from "lucide-react";
+import {useFrameAnalysis} from "@/hooks/useFrameAnalysis";
 
 interface VideoPlayerProps {
   videoUrl: string;
@@ -10,15 +10,15 @@ interface VideoPlayerProps {
   isOpen: boolean;
 }
 
-export function VideoPlayer({ videoUrl, onClose, isOpen }: VideoPlayerProps) {
+export function VideoPlayer({videoUrl, onClose, isOpen}: VideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
-  
-  // Frame analysis hook
-  const { showOverlay } = useFrameAnalysis(videoRef, isPlaying);
+
+  // Frame analysis hook - returns a QR code URL for the current frame (or null if none)
+  const {qrCodeUrl} = useFrameAnalysis(videoRef, isPlaying);
 
   useEffect(() => {
     if (!isOpen) {
@@ -87,8 +87,7 @@ export function VideoPlayer({ videoUrl, onClose, isOpen }: VideoPlayerProps) {
         <button
           onClick={onClose}
           className="absolute -top-12 right-0 text-white hover:text-gray-300 transition-colors"
-          aria-label="Close video player"
-        >
+          aria-label="Close video player">
           <X className="w-8 h-8" />
         </button>
 
@@ -103,11 +102,13 @@ export function VideoPlayer({ videoUrl, onClose, isOpen }: VideoPlayerProps) {
             onEnded={() => setIsPlaying(false)}
           />
 
-          {/* Conditional overlay */}
-          {showOverlay && (
-            <div className="absolute inset-0 bg-red-500/30 border-4 border-red-500 pointer-events-none transition-opacity duration-200">
-              <div className="absolute top-4 left-4 bg-red-500 text-white px-4 py-2 rounded-lg font-semibold">
-                Analysis Alert
+          {/* QR code overlay - only shows when qrCodeUrl is a non-empty string */}
+          {qrCodeUrl && (
+            <div className="absolute inset-0 pointer-events-none">
+              <div className="absolute top-4 left-4">
+                {/* Transparent overlay container with only the QR PNG visible */}
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={qrCodeUrl} alt="QR code overlay" className="w-24 h-24 object-contain" />
               </div>
             </div>
           )}
@@ -130,25 +131,15 @@ export function VideoPlayer({ videoUrl, onClose, isOpen }: VideoPlayerProps) {
                 <button
                   onClick={togglePlay}
                   className="text-white hover:text-gray-300 transition-colors"
-                  aria-label={isPlaying ? 'Pause' : 'Play'}
-                >
-                  {isPlaying ? (
-                    <Pause className="w-6 h-6" />
-                  ) : (
-                    <Play className="w-6 h-6" />
-                  )}
+                  aria-label={isPlaying ? "Pause" : "Play"}>
+                  {isPlaying ? <Pause className="w-6 h-6" /> : <Play className="w-6 h-6" />}
                 </button>
 
                 <button
                   onClick={toggleMute}
                   className="text-white hover:text-gray-300 transition-colors"
-                  aria-label={isMuted ? 'Unmute' : 'Mute'}
-                >
-                  {isMuted ? (
-                    <VolumeX className="w-6 h-6" />
-                  ) : (
-                    <Volume2 className="w-6 h-6" />
-                  )}
+                  aria-label={isMuted ? "Unmute" : "Mute"}>
+                  {isMuted ? <VolumeX className="w-6 h-6" /> : <Volume2 className="w-6 h-6" />}
                 </button>
 
                 <span className="text-white text-sm">
@@ -159,8 +150,7 @@ export function VideoPlayer({ videoUrl, onClose, isOpen }: VideoPlayerProps) {
               <button
                 onClick={toggleFullscreen}
                 className="text-white hover:text-gray-300 transition-colors"
-                aria-label="Fullscreen"
-              >
+                aria-label="Fullscreen">
                 <Maximize className="w-6 h-6" />
               </button>
             </div>
@@ -174,5 +164,5 @@ export function VideoPlayer({ videoUrl, onClose, isOpen }: VideoPlayerProps) {
 function formatTime(seconds: number): string {
   const mins = Math.floor(seconds / 60);
   const secs = Math.floor(seconds % 60);
-  return `${mins}:${secs.toString().padStart(2, '0')}`;
+  return `${mins}:${secs.toString().padStart(2, "0")}`;
 }
