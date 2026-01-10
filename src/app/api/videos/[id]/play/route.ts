@@ -56,8 +56,12 @@ export async function GET(request: NextRequest, context: {params: Promise<{id: s
     let key: string | null = null;
 
     if (variant === "watermarked") {
-      // For watermarked variant, use processed_url
-      if (!video.processed_url) {
+      // For watermarked variant:
+      // 1. Prefer processed_url if it exists (for videos that were processed after upload)
+      // 2. Fall back to original_url (since in this app, uploaded videos are already watermarked)
+      const watermarkedUrl = video.processed_url || video.original_url;
+      
+      if (!watermarkedUrl) {
         return NextResponse.json(
           {
             success: false,
@@ -67,10 +71,10 @@ export async function GET(request: NextRequest, context: {params: Promise<{id: s
         );
       }
 
-      if (video.processed_url.startsWith("http")) {
-        key = extractKeyFromUrl(video.processed_url);
+      if (watermarkedUrl.startsWith("http")) {
+        key = extractKeyFromUrl(watermarkedUrl);
       } else {
-        key = video.processed_url;
+        key = watermarkedUrl;
       }
     } else {
       // For original variant, use original_url
@@ -96,7 +100,8 @@ export async function GET(request: NextRequest, context: {params: Promise<{id: s
       videoId,
       variant,
       userId: authData.user.id,
-      url_field: variant === "watermarked" ? video.processed_url : video.original_url,
+      url_field: variant === "watermarked" ? (video.processed_url || video.original_url) : video.original_url,
+      has_processed_url: !!video.processed_url,
       resolved_key: key,
       playbackUrl,
     });

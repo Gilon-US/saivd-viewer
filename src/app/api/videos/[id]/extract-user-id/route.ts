@@ -59,8 +59,12 @@ export async function GET(request: NextRequest, context: {params: Promise<{id: s
       return NextResponse.json({success: false, error: {code: "not_found", message: "Video not found"}}, {status: 404});
     }
 
-    // Verify video has processed_url (watermarked version)
-    if (!video.processed_url) {
+    // For user ID extraction, we need a watermarked video:
+    // 1. Prefer processed_url if it exists (for videos that were processed after upload)
+    // 2. Fall back to original_url (since in this app, uploaded videos are already watermarked)
+    const watermarkedUrl = video.processed_url || video.original_url;
+    
+    if (!watermarkedUrl) {
       return NextResponse.json(
         {
           success: false,
@@ -73,12 +77,12 @@ export async function GET(request: NextRequest, context: {params: Promise<{id: s
       );
     }
 
-    // Extract S3 key from processed_url (handles both URL and key formats)
+    // Extract S3 key from watermarked URL (handles both URL and key formats)
     let videoKey: string | null = null;
-    if (video.processed_url.startsWith("http")) {
-      videoKey = extractKeyFromUrl(video.processed_url);
+    if (watermarkedUrl.startsWith("http")) {
+      videoKey = extractKeyFromUrl(watermarkedUrl);
     } else {
-      videoKey = video.processed_url;
+      videoKey = watermarkedUrl;
     }
 
     if (!videoKey) {
