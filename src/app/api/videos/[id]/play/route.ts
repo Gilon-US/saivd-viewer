@@ -7,14 +7,28 @@ import {generatePresignedVideoUrl, extractKeyFromUrl} from "@/lib/wasabi-urls";
  *
  * Generates a fresh playback URL for the requested video.
  *
+ * Query parameters:
+ * - variant: "original" (default) or "watermarked"
+ *
  * - Authenticates the user
  * - Ensures the video belongs to the authenticated user
- * - Treats videos.original_url as the stable object key (new behavior)
- *   - For legacy rows where original_url is a full URL, extracts the key
+ * - For "original" variant: Uses videos.original_url as the stable object key
+ * - For "watermarked" variant: Uses videos.processed_url as the stable object key
+ *   - For legacy rows where URLs are full URLs, extracts the key
  */
-export async function GET(_request: NextRequest, context: {params: Promise<{id: string}>}) {
+export async function GET(request: NextRequest, context: {params: Promise<{id: string}>}) {
   try {
     const {id: videoId} = await context.params;
+    const {searchParams} = new URL(request.url);
+    const variant = searchParams.get("variant") || "original";
+
+    // Validate variant parameter
+    if (variant !== "original" && variant !== "watermarked") {
+      return NextResponse.json(
+        {success: false, error: {code: "invalid_variant", message: 'Variant must be "original" or "watermarked"'}},
+        {status: 400}
+      );
+    }
 
     const supabase = await createClient();
     const {data: authData} = await supabase.auth.getUser();
@@ -38,15 +52,33 @@ export async function GET(_request: NextRequest, context: {params: Promise<{id: 
       return NextResponse.json({success: false, error: {code: "not_found", message: "Video not found"}}, {status: 404});
     }
 
-    // Determine the object key.
-    // New behavior: original_url stores the key directly.
-    // Legacy behavior: original_url may be a full URL, so extract the key.
+    // Determine the object key based on variant
     let key: string | null = null;
 
-    if (video.original_url?.startsWith("http")) {
-      key = extractKeyFromUrl(video.original_url);
+    if (variant === "watermarked") {
+      // For watermarked variant, use processed_url
+      if (!video.processed_url) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: {code: "watermarked_not_available", message: "Watermarked version not available for this video"},
+          },
+          {status: 400}
+        );
+      }
+
+      if (video.processed_url.startsWith("http")) {
+        key = extractKeyFromUrl(video.processed_url);
+      } else {
+        key = video.processed_url;
+      }
     } else {
-      key = video.original_url;
+      // For original variant, use original_url
+      if (video.original_url?.startsWith("http")) {
+        key = extractKeyFromUrl(video.original_url);
+      } else {
+        key = video.original_url;
+      }
     }
 
     if (!key) {
@@ -62,8 +94,9 @@ export async function GET(_request: NextRequest, context: {params: Promise<{id: 
     // Debug: log what we are returning to the client
     console.log("Playback URL generated:", {
       videoId,
+      variant,
       userId: authData.user.id,
-      original_url: video.original_url,
+      url_field: variant === "watermarked" ? video.processed_url : video.original_url,
       resolved_key: key,
       playbackUrl,
     });

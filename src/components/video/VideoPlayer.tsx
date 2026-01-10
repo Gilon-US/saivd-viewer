@@ -6,25 +6,25 @@ import {useFrameAnalysis} from "@/hooks/useFrameAnalysis";
 
 interface VideoPlayerProps {
   videoUrl: string;
+  videoId?: string | null;
   onClose: () => void;
   isOpen: boolean;
+  enableFrameAnalysis: boolean;
 }
 
-export function VideoPlayer({videoUrl, onClose, isOpen}: VideoPlayerProps) {
+export function VideoPlayer({videoUrl, videoId, onClose, isOpen, enableFrameAnalysis}: VideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
 
-  // Frame analysis hook - returns a QR code URL for the current frame (or null if none)
-  const {qrCodeUrl} = useFrameAnalysis(videoRef, isPlaying);
-
-  // TEMP: For testing, fall back to the hardcoded QR URL if analysis doesn't provide one
-  const effectiveQrUrl = qrCodeUrl || "https://saivd.netlify.app/profile/1/qr";
-
-  // Debug: log what QR URL is being used
-  console.log("VideoPlayer QR overlay URL:", {qrCodeUrl, effectiveQrUrl});
+  // Frame analysis hook - returns a QR code URL when user ID is extracted
+  const {qrUrl} = useFrameAnalysis(
+    videoRef,
+    isPlaying,
+    enableFrameAnalysis && videoId ? videoId : undefined
+  );
 
   useEffect(() => {
     if (!isOpen) {
@@ -41,6 +41,10 @@ export function VideoPlayer({videoUrl, onClose, isOpen}: VideoPlayerProps) {
       if (isPlaying) {
         videoRef.current.pause();
       } else {
+        // If video has ended, seek to start before playing
+        if (videoRef.current.currentTime >= videoRef.current.duration) {
+          videoRef.current.currentTime = 0;
+        }
         videoRef.current.play();
       }
       setIsPlaying(!isPlaying);
@@ -108,14 +112,15 @@ export function VideoPlayer({videoUrl, onClose, isOpen}: VideoPlayerProps) {
             onEnded={() => setIsPlaying(false)}
           />
 
-          {/* QR code overlay - only shows when effectiveQrUrl is a non-empty string */}
-          {effectiveQrUrl && (
-            <div className="absolute inset-0 pointer-events-none">
-              <div className="absolute top-4 left-4">
-                {/* Transparent overlay container with only the QR PNG visible */}
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={effectiveQrUrl} alt="QR code overlay" className="w-24 h-24 object-contain" />
-              </div>
+          {/* QR code overlay - positioned at top-left corner */}
+          {qrUrl && (
+            <div className="absolute top-2 left-2 pointer-events-none">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={qrUrl}
+                alt="Creator QR code"
+                className="w-16 h-16 object-contain rounded-md shadow-md"
+              />
             </div>
           )}
 

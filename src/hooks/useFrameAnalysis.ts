@@ -3,123 +3,114 @@
 import {useEffect, useState, useRef, RefObject} from "react";
 
 /**
- * Frame data passed to the analysis function
- */
-export interface FrameData {
-  canvas: HTMLCanvasElement;
-  context: CanvasRenderingContext2D;
-  imageData: ImageData;
-  timestamp: number;
-  videoTime: number;
-}
-
-/**
- * Frame analysis function type
- * Returns a string URL pointing to a QR code image to display as an overlay.
- * If the function returns null or an empty string, no overlay is shown.
- */
-export type FrameAnalysisFunction = (frameData: FrameData) => string | null;
-
-/**
- * Default placeholder frame analysis function
- * This will be replaced with actual analysis logic in the future.
- * It should eventually return a QR code image URL (string) when a QR should be shown
- * for the current frame, or null/empty string when no overlay should be displayed.
- */
-const defaultAnalysisFunction: FrameAnalysisFunction = (_frameData: FrameData): string | null => {
-  // Placeholder implementation
-  // Future implementations could include:
-  // - Face detection
-  // - Object recognition
-  // - Watermark verification
-  // - Content moderation
-  // - Quality analysis
-
-  // TEMP: For testing purposes, always return a hardcoded QR code URL.
-  // In production, this should decode the creator's numeric_user_id from the frame
-  // and construct the appropriate QR code URL dynamically.
-  return "https://saivd.netlify.app/profile/1/qr";
-};
-
-/**
- * Custom hook for analyzing video frames in real-time
+ * Custom hook for analyzing video frames in real-time and extracting user ID from watermarked videos.
+ * 
+ * This hook:
+ * - Counts frames during playback
+ * - Extracts user ID every 20 frames via API call
+ * - Manages QR code URL state based on extracted user ID
+ * - Persists extracted user ID across pause/play/end cycles
+ * - Restores QR URL immediately on replay without re-extraction
  *
  * @param videoRef - Reference to the video element
  * @param isPlaying - Whether the video is currently playing
- * @param analysisFunction - Optional custom analysis function that returns a QR code URL
- * @returns Object containing qrCodeUrl state
+ * @param videoId - Optional video ID for user ID extraction (only for watermarked videos)
+ * @returns Object containing qrUrl and showOverlay state
  */
 export function useFrameAnalysis(
   videoRef: RefObject<HTMLVideoElement | null>,
   isPlaying: boolean,
-  analysisFunction: FrameAnalysisFunction = defaultAnalysisFunction
-) {
-  const [qrCodeUrl, setQrCodeUrl] = useState<string | null>(null);
+  videoId?: string
+): {qrUrl: string | null; showOverlay: boolean} {
+  // React State
+  const [qrUrl, setQrUrl] = useState<string | null>(null);
+  const [extractedUserId, setExtractedUserId] = useState<string | null>(null);
+
+  // React Refs (persist across renders, don't trigger re-renders)
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const contextRef = useRef<CanvasRenderingContext2D | null>(null);
   const animationFrameRef = useRef<number | null>(null);
+  const skipPixelReadRef = useRef<boolean>(false);
+  const frameCountRef = useRef<number>(0);
+  const lastExtractionFrameRef = useRef<number>(-1);
+  const isExtractingRef = useRef<boolean>(false);
 
+  // Initialize canvas for frame capture
   useEffect(() => {
-    // Initialize canvas for frame capture
     if (!canvasRef.current) {
       canvasRef.current = document.createElement("canvas");
       contextRef.current = canvasRef.current.getContext("2d", {
         willReadFrequently: true,
       });
     }
+  }, []);
 
+  // Main frame analysis loop
+  useEffect(() => {
     const analyzeFrame = () => {
       const video = videoRef.current;
       const canvas = canvasRef.current;
       const context = contextRef.current;
 
+      // Early exit if video not ready
       if (!video || !canvas || !context || video.paused || video.ended) {
         return;
       }
 
-      // Set canvas size to match video
+      // Handle canvas resize
       if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
         canvas.width = video.videoWidth;
         canvas.height = video.videoHeight;
       }
 
-      // Draw current video frame to canvas
+      // Draw current frame to canvas
       context.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-      // Get image data
-      let imageData: ImageData;
-      try {
-        imageData = context.getImageData(0, 0, canvas.width, canvas.height);
-      } catch (error) {
-        // This can happen if the canvas is tainted by cross-origin video content.
-        console.error("Error reading frame pixels (likely cross-origin video):", error);
-        setQrCodeUrl(null);
-        // Stop further analysis attempts for this playback to avoid spamming errors.
-        if (animationFrameRef.current !== null) {
-          cancelAnimationFrame(animationFrameRef.current);
-          animationFrameRef.current = null;
+      // Handle tainted canvas (CORS issues)
+      // Note: We don't actually use the imageData for extraction (external service handles that),
+      // but we need to call getImageData to detect CORS errors
+      if (!skipPixelReadRef.current) {
+        try {
+          context.getImageData(0, 0, canvas.width, canvas.height);
+        } catch (error) {
+          if (error instanceof DOMException && error.name === "SecurityError") {
+            skipPixelReadRef.current = true; // Skip pixel reads on subsequent frames
+          } else {
+            throw error;
+          }
         }
-        return;
       }
 
-      // Prepare frame data
-      const frameData: FrameData = {
-        canvas,
-        context,
-        imageData,
-        timestamp: performance.now(),
-        videoTime: video.currentTime,
-      };
+      // User ID extraction logic (only if videoId provided)
+      if (videoId && !isExtractingRef.current) {
+        frameCountRef.current += 1;
 
-      // Call analysis function and update QR code URL state
-      try {
-        const url = analysisFunction(frameData);
-        // Normalize empty/whitespace to null
-        const normalizedUrl = typeof url === "string" && url.trim().length > 0 ? url.trim() : null;
-        setQrCodeUrl(normalizedUrl);
-      } catch (error) {
-        console.error("Error in frame analysis:", error);
-        setQrCodeUrl(null);
+        // Extract every 20 frames
+        if (frameCountRef.current - lastExtractionFrameRef.current >= 20) {
+          const frameIndex = frameCountRef.current;
+          isExtractingRef.current = true;
+          lastExtractionFrameRef.current = frameCountRef.current;
+
+          // Fire-and-forget API call (non-blocking)
+          fetch(`/api/videos/${videoId}/extract-user-id?frame_index=${frameIndex}`)
+            .then(async (response) => {
+              if (!response.ok) {
+                console.warn("[FrameAnalysis] Failed to extract user ID", response.status);
+                return;
+              }
+              const data = await response.json();
+              if (data.success && data.data?.user_id) {
+                setExtractedUserId(data.data.user_id);
+              }
+            })
+            .catch((error) => {
+              console.error("[FrameAnalysis] Error extracting user ID:", error);
+              // Silent failure, extraction will retry on next interval
+            })
+            .finally(() => {
+              isExtractingRef.current = false;
+            });
+        }
       }
 
       // Schedule next frame analysis
@@ -140,14 +131,52 @@ export function useFrameAnalysis(
         animationFrameRef.current = null;
       }
     };
-  }, [videoRef, isPlaying, analysisFunction]);
+  }, [videoRef, isPlaying, videoId]);
 
-  // Reset overlay when video stops
+  // Effect 1: Frame Counter Reset on Playback Stop
   useEffect(() => {
     if (!isPlaying) {
-      setQrCodeUrl(null);
+      // Reset frame counters, but preserve extractedUserId and qrUrl
+      frameCountRef.current = 0;
+      lastExtractionFrameRef.current = -1;
+      isExtractingRef.current = false;
+    } else {
+      // When video starts playing, restore QR URL if we have extractedUserId
+      if (videoId && extractedUserId && !qrUrl) {
+        const qrUrlFromUserId = `/profile/${extractedUserId}/qr`;
+        setQrUrl((currentQrUrl) => {
+          if (currentQrUrl !== qrUrlFromUserId) {
+            return qrUrlFromUserId;
+          }
+          return currentQrUrl;
+        });
+      }
     }
-  }, [isPlaying]);
+  }, [isPlaying, videoId, extractedUserId, qrUrl]);
 
-  return {qrCodeUrl};
+  // Effect 2: Reset on Video ID Change
+  useEffect(() => {
+    // When videoId changes, reset everything
+    setExtractedUserId(null);
+    setQrUrl(null);
+    frameCountRef.current = 0;
+    lastExtractionFrameRef.current = -1;
+    isExtractingRef.current = false;
+    skipPixelReadRef.current = false;
+  }, [videoId]);
+
+  // Effect 3: Update QR URL When User ID Extracted
+  useEffect(() => {
+    if (videoId && extractedUserId) {
+      const qrUrlFromUserId = `/profile/${extractedUserId}/qr`;
+      setQrUrl(qrUrlFromUserId);
+    } else if (!videoId) {
+      setQrUrl(null);
+    }
+  }, [videoId, extractedUserId]);
+
+  return {
+    qrUrl,
+    showOverlay: qrUrl !== null,
+  };
 }

@@ -46,9 +46,13 @@ export function VideoGrid({videos, isLoading, error, onRefresh, onOpenUploadModa
   const [videoPlayer, setVideoPlayer] = useState<{
     isOpen: boolean;
     videoUrl: string | null;
+    videoId: string | null;
+    enableFrameAnalysis: boolean;
   }>({
     isOpen: false,
     videoUrl: null,
+    videoId: null,
+    enableFrameAnalysis: false,
   });
 
   const [isOpeningVideo, setIsOpeningVideo] = useState<string | null>(null);
@@ -57,23 +61,19 @@ export function VideoGrid({videos, isLoading, error, onRefresh, onOpenUploadModa
     try {
       setIsOpeningVideo(video.id);
 
-      const response = await fetch(`/api/videos/${video.id}/play`);
+      // Always use watermarked variant for playback with frame analysis
+      const response = await fetch(`/api/videos/${video.id}/play?variant=watermarked`);
       const data = await response.json();
 
       if (!response.ok || !data.success || !data.data?.playbackUrl) {
         throw new Error(data.error?.message || "Failed to generate playback URL");
       }
 
-      // Debug: log the playback URL we are about to use
-      console.log("Opening video with playback URL:", {
-        id: video.id,
-        filename: video.filename,
-        playbackUrl: data.data.playbackUrl,
-      });
-
       setVideoPlayer({
         isOpen: true,
         videoUrl: data.data.playbackUrl,
+        videoId: video.id,
+        enableFrameAnalysis: true, // Always enable frame analysis for watermarked videos
       });
     } catch (error) {
       console.error("Error opening video:", error);
@@ -92,6 +92,8 @@ export function VideoGrid({videos, isLoading, error, onRefresh, onOpenUploadModa
     setVideoPlayer({
       isOpen: false,
       videoUrl: null,
+      videoId: null,
+      enableFrameAnalysis: false,
     });
   };
 
@@ -284,7 +286,13 @@ export function VideoGrid({videos, isLoading, error, onRefresh, onOpenUploadModa
 
       {/* Video player */}
       {videoPlayer.videoUrl && (
-        <VideoPlayer videoUrl={videoPlayer.videoUrl} onClose={handleClosePlayer} isOpen={videoPlayer.isOpen} />
+        <VideoPlayer
+          videoUrl={videoPlayer.videoUrl}
+          videoId={videoPlayer.videoId}
+          onClose={handleClosePlayer}
+          isOpen={videoPlayer.isOpen}
+          enableFrameAnalysis={videoPlayer.enableFrameAnalysis}
+        />
       )}
     </div>
   );
