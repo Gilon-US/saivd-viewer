@@ -3,7 +3,8 @@
   publish = ".next"
 
 [build.environment]
-  NODE_VERSION = "18"
+  NODE_VERSION = "20"
+  AWS_LAMBDA_JS_RUNTIME = "nodejs20.x"
   # Configure secrets scanning via environment variables
   # These must be set as environment variables in Netlify UI, not in this file
   SECRETS_SCAN_OMIT_KEYS = "NEXT_PUBLIC_SUPABASE_URL,NEXT_PUBLIC_SUPABASE_ANON_KEY,NEXT_PUBLIC_APP_URL,WASABI_REGION,WASABI_BUCKET_NAME"
