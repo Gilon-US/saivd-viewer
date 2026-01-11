@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { LoadingSpinner } from '@/components/ui/loading-spinner';
 import { useVideoUpload, UploadResult } from '@/hooks/useVideoUpload';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -128,18 +129,24 @@ export function VideoUploader({
       )}
       
       {isUploading && currentUpload && (
-        <div className="space-y-4">
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <p className="font-medium">Uploading {currentUpload.file.name}</p>
-              <p className="text-sm font-medium">{currentUpload.progress}%</p>
+        <Card>
+          <CardContent className="p-4 space-y-4">
+            <div className="flex items-center gap-3 mb-2">
+              <LoadingSpinner size="sm" />
+              <div className="flex-1">
+                <div className="flex items-center justify-between mb-2">
+                  <p className="font-medium">Uploading video...</p>
+                  <p className="text-sm font-medium text-gray-600 dark:text-gray-400">{currentUpload.progress}%</p>
+                </div>
+                <p className="text-sm text-gray-500 dark:text-gray-400 truncate">{currentUpload.file.name}</p>
+              </div>
             </div>
             <Progress value={currentUpload.progress} className="h-2" />
-          </div>
-          <Button variant="outline" onClick={handleCancel}>
-            Cancel Upload
-          </Button>
-        </div>
+            <Button variant="outline" onClick={handleCancel} className="w-full">
+              Cancel Upload
+            </Button>
+          </CardContent>
+        </Card>
       )}
       
       {error && (

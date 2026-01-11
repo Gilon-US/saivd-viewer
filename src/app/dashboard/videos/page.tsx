@@ -23,13 +23,8 @@ export default function VideosPage() {
   };
 
   const handleUploadComplete = (result: UploadResult) => {
-    toast({
-      title: "Upload complete",
-      description: `${result.filename} has been uploaded successfully.`,
-      variant: "success",
-    });
-
-    // Refresh the video list after a short delay to ensure the new video is included
+    // Note: A toast is already shown by useVideoUpload hook, so we don't need to show another one here
+    // Just refresh the video list after a short delay to ensure the new video is included
     setTimeout(() => {
       refresh();
     }, 1000);

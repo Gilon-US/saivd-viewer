@@ -50,12 +50,31 @@ export function UploadModal({ isOpen, onClose, onUploadComplete }: UploadModalPr
               <VideoUploader onUploadComplete={handleUploadComplete} />
             </div>
           ) : (
-            <div className="text-center py-4">
-              <h3 className="text-lg font-medium text-green-600 mb-2">Upload Successful!</h3>
-              <p className="text-gray-500 dark:text-gray-400 mb-6">
-                Your video has been uploaded successfully and will appear in your video grid.
-              </p>
-              <div className="flex justify-center space-x-4">
+            <div className="text-center py-6">
+              <div className="mb-6">
+                <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-green-100 dark:bg-green-900/20 mb-4">
+                  <svg
+                    className="w-8 h-8 text-green-600 dark:text-green-400"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M5 13l4 4L19 7"
+                    />
+                  </svg>
+                </div>
+                <h3 className="text-xl font-semibold text-green-600 dark:text-green-400 mb-2">
+                  Upload Complete!
+                </h3>
+                <p className="text-gray-600 dark:text-gray-400">
+                  Your video has been uploaded successfully and is now available in your video library.
+                </p>
+              </div>
+              <div className="flex justify-center gap-3">
                 <Button variant="outline" onClick={() => {
                   setUploadComplete(false);
                 }}>

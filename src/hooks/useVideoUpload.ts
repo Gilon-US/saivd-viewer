@@ -156,10 +156,10 @@ export function useVideoUpload() {
         };
       });
       
-      // Show success toast
+      // Show success toast with clear message
       toast({
-        title: 'Upload complete',
-        description: `${file.name} has been uploaded successfully.`,
+        title: 'Video upload successful',
+        description: `"${file.name}" has been uploaded successfully and is now available in your video library.`,
         variant: 'success',
       });
       

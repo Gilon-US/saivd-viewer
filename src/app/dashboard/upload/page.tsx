@@ -47,23 +47,37 @@ export default function UploadPage() {
       ) : (
         <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6 text-center">
           <div className="mb-6">
-            <h2 className="text-xl font-semibold text-green-600 mb-2">Upload Complete!</h2>
-            <p className="text-gray-600 dark:text-gray-400">
-              Your video has been successfully uploaded. You can now view it in your video library.
+            <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-green-100 dark:bg-green-900/20 mb-4">
+              <svg
+                className="w-8 h-8 text-green-600 dark:text-green-400"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M5 13l4 4L19 7"
+                />
+              </svg>
+            </div>
+            <h2 className="text-2xl font-semibold text-green-600 dark:text-green-400 mb-2">
+              Upload Complete!
+            </h2>
+            <p className="text-gray-600 dark:text-gray-400 mb-4">
+              Your video has been uploaded successfully and is now available in your video library.
             </p>
             {uploadResult && (
-              <div className="mt-4 p-4 bg-gray-50 dark:bg-gray-700 rounded-lg text-left">
-                <h3 className="font-medium mb-2">Video Details</h3>
-                <p className="text-sm">
-                  <span className="font-medium">Name:</span> {uploadResult.filename}
-                </p>
-                <p className="text-sm">
-                  <span className="font-medium">URL:</span> {uploadResult.originalUrl}
+              <div className="mt-4 p-4 bg-gray-50 dark:bg-gray-700 rounded-lg text-left max-w-md mx-auto">
+                <h3 className="font-medium mb-2 text-gray-900 dark:text-gray-100">Video Details</h3>
+                <p className="text-sm text-gray-700 dark:text-gray-300">
+                  <span className="font-medium">Filename:</span> {uploadResult.filename}
                 </p>
               </div>
             )}
           </div>
-          <div className="flex justify-center space-x-4">
+          <div className="flex justify-center gap-3">
             <Button variant="outline" onClick={handleUploadAnother}>
               Upload Another Video
             </Button>
