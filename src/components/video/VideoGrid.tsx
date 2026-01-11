@@ -246,12 +246,6 @@ export function VideoGrid({videos, isLoading, error, onRefresh, onOpenUploadModa
                     <LoadingSpinner size="sm" />
                   </div>
                 )}
-                {video.status === "processing" && (
-                  <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/60 backdrop-blur-sm z-20">
-                    <LoadingSpinner size="md" />
-                    <p className="mt-3 text-white text-sm font-medium">Processing...</p>
-                  </div>
-                )}
                 {video.preview_thumbnail_data ? (
                   // Using <img> for base64 data URLs is appropriate since Next.js Image component
                   // is designed for external URLs and file paths, not data URLs
