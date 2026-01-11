@@ -26,14 +26,15 @@ export function VideoPlayer({videoUrl, videoId, onClose, isOpen, enableFrameAnal
   const abortControllerRef = useRef<AbortController | null>(null);
 
   // Frame analysis hook - returns a QR code URL when user ID is extracted
-  // Only use if we haven't verified yet (for backward compatibility)
+  // This continues to run during playback (every 20 frames) as before
   const {qrUrl: frameAnalysisQrUrl} = useFrameAnalysis(
     videoRef,
     isPlaying,
-    enableFrameAnalysis && videoId && verificationStatus !== "verified" ? videoId : undefined
+    enableFrameAnalysis && videoId ? videoId : undefined
   );
 
   // Determine QR URL: use verified user ID if available, otherwise use frame analysis result
+  // The verified user ID takes precedence, but frame analysis can still update it if needed
   const qrUrl = verifiedUserId
     ? `https://saivd.netlify.app/profile/${verifiedUserId}/qr`
     : frameAnalysisQrUrl;
