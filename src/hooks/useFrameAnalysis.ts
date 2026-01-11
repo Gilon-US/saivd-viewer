@@ -85,8 +85,11 @@ export function useFrameAnalysis(
       if (videoId && !isExtractingRef.current) {
         frameCountRef.current += 1;
 
-        // Extract every 20 frames
-        if (frameCountRef.current - lastExtractionFrameRef.current >= 20) {
+        // Extract at frame 1 (first frame), then every 20 frames (21, 41, 61, ...)
+        const isFirstExtraction = lastExtractionFrameRef.current === -1;
+        const shouldExtract = isFirstExtraction || frameCountRef.current - lastExtractionFrameRef.current >= 20;
+
+        if (shouldExtract) {
           const frameIndex = frameCountRef.current;
           isExtractingRef.current = true;
           lastExtractionFrameRef.current = frameCountRef.current;
