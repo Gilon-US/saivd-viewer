@@ -172,6 +172,10 @@ export async function GET(request: NextRequest, context: {params: Promise<{id: s
       );
     }
 
+    // Normalize URL to prevent double slashes
+    const baseUrl = watermarkServiceUrl.endsWith("/") ? watermarkServiceUrl.slice(0, -1) : watermarkServiceUrl;
+    const watermarkApiUrl = `${baseUrl}/extract_user_id`;
+
     // Call external watermark service
     try {
       const requestBody = {
@@ -180,7 +184,6 @@ export async function GET(request: NextRequest, context: {params: Promise<{id: s
         bucket: wasabiBucket,
       };
 
-      const watermarkApiUrl = `${watermarkServiceUrl}/extract_user_id`;
       const apiCallStartTime = Date.now();
 
       const headers: Record<string, string> = {
@@ -312,7 +315,7 @@ export async function GET(request: NextRequest, context: {params: Promise<{id: s
         error: errorMessage,
         stack: errorStack,
         durationMs: apiCallDuration,
-        apiUrl: `${watermarkServiceUrl}/extract_user_id`,
+        apiUrl: watermarkApiUrl,
         timestamp: new Date().toISOString(),
       });
 
