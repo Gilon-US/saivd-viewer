@@ -146,7 +146,7 @@ export function useFrameAnalysis(
     } else {
       // When video starts playing, restore QR URL if we have extractedUserId
       if (videoId && extractedUserId && !qrUrl) {
-        const qrUrlFromUserId = `/profile/${extractedUserId}/qr`;
+        const qrUrlFromUserId = `https://saivd.netlify.app/profile/${extractedUserId}/qr`;
         setQrUrl((currentQrUrl) => {
           if (currentQrUrl !== qrUrlFromUserId) {
             return qrUrlFromUserId;
@@ -171,7 +171,7 @@ export function useFrameAnalysis(
   // Effect 3: Update QR URL When User ID Extracted
   useEffect(() => {
     if (videoId && extractedUserId) {
-      const qrUrlFromUserId = `/profile/${extractedUserId}/qr`;
+      const qrUrlFromUserId = `https://saivd.netlify.app/profile/${extractedUserId}/qr`;
       setQrUrl(qrUrlFromUserId);
     } else if (!videoId) {
       setQrUrl(null);
