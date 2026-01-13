@@ -3,14 +3,15 @@
  */
 
 export interface ThumbnailOptions {
-  width?: number;
-  height?: number;
-  quality?: number;
-  seekTime?: number; // Time in seconds to seek to, or percentage if < 1
+  width?: number;      // Maximum width (default: 240)
+  height?: number;     // Maximum height (default: 135)
+  quality?: number;    // JPEG quality 0-1 (default: 0.8)
+  seekTime?: number;   // Time in seconds or percentage < 1 (default: 0.1)
 }
 
 /**
  * Generates a thumbnail from a video file using browser APIs
+ * Preserves aspect ratio for both portrait and landscape videos
  * @param videoFile The video file to generate thumbnail from
  * @param options Thumbnail generation options
  * @returns Promise that resolves to base64 data URL of the thumbnail
@@ -20,10 +21,10 @@ export function generateVideoThumbnail(
   options: ThumbnailOptions = {}
 ): Promise<string> {
   const {
-    width = 240,
-    height = 135, // 16:9 aspect ratio
+    width: maxWidth = 240,
+    height: maxHeight = 135,
     quality = 0.8,
-    seekTime = 0.1 // Default to 10% of video duration
+    seekTime = 0.1
   } = options;
 
   return new Promise((resolve, reject) => {
@@ -36,52 +37,131 @@ export function generateVideoThumbnail(
       return;
     }
 
-    // Set canvas dimensions
-    canvas.width = width;
-    canvas.height = height;
+    // Configure video element
+    video.preload = 'metadata';
+    video.muted = true;
+    video.playsInline = true;
 
-    // Handle video loading errors
-    video.onerror = () => {
-      reject(new Error('Failed to load video file'));
+    let hasCaptured = false;
+    let objectUrl: string | null = null;
+
+    // Error handling
+    video.onerror = (e) => {
+      const error = video.error;
+      const errorMsg = error 
+        ? `Failed to load video file: ${error.message || `Error code ${error.code}`}`
+        : 'Failed to load video file';
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      reject(new Error(errorMsg));
     };
 
-    // When metadata is loaded, we can seek to the desired time
+    // Metadata loaded - seek to target time
     video.onloadedmetadata = () => {
       try {
-        // Calculate seek time
-        const targetTime = seekTime < 1 
-          ? video.duration * seekTime  // Percentage of duration
-          : Math.min(seekTime, video.duration); // Absolute time in seconds
-
+        let targetTime = seekTime < 1 
+          ? video.duration * seekTime
+          : Math.min(seekTime, video.duration);
+        
+        // Ensure minimum seek time of 0.5 seconds for keyframe compatibility
+        // MOV files and some MP4 files may not have keyframes at the very start
+        targetTime = Math.max(0.5, Math.min(targetTime, video.duration - 0.1));
         video.currentTime = targetTime;
-      } catch {
+      } catch (err) {
+        if (objectUrl) URL.revokeObjectURL(objectUrl);
         reject(new Error('Failed to seek video'));
       }
     };
 
-    // When we've seeked to the target time, capture the frame
-    video.onseeked = () => {
+    // Frame capture function
+    const captureFrame = () => {
+      if (hasCaptured) return;
+      hasCaptured = true;
+
       try {
-        // Draw the video frame to canvas
-        ctx.drawImage(video, 0, 0, width, height);
+        // Validate dimensions
+        if (video.videoWidth <= 0 || video.videoHeight <= 0) {
+          if (objectUrl) URL.revokeObjectURL(objectUrl);
+          reject(new Error('Video dimensions are invalid'));
+          return;
+        }
+
+        // Calculate canvas dimensions preserving aspect ratio
+        const isPortrait = video.videoHeight > video.videoWidth;
+        const videoAspectRatio = video.videoWidth / video.videoHeight;
         
-        // Convert canvas to base64 data URL
-        const thumbnailDataUrl = canvas.toDataURL('image/jpeg', quality);
+        let canvasWidth: number;
+        let canvasHeight: number;
         
-        // Clean up
-        URL.revokeObjectURL(video.src);
+        if (isPortrait) {
+          // Portrait video: fit to max height, calculate width
+          canvasHeight = maxHeight;
+          canvasWidth = maxHeight * videoAspectRatio;
+          
+          // If calculated width exceeds max width, fit to width instead
+          if (canvasWidth > maxWidth) {
+            canvasWidth = maxWidth;
+            canvasHeight = maxWidth / videoAspectRatio;
+          }
+        } else {
+          // Landscape video: fit to max width, calculate height
+          canvasWidth = maxWidth;
+          canvasHeight = maxWidth / videoAspectRatio;
+          
+          // If calculated height exceeds max height, fit to height instead
+          if (canvasHeight > maxHeight) {
+            canvasHeight = maxHeight;
+            canvasWidth = maxHeight * videoAspectRatio;
+          }
+        }
         
-        resolve(thumbnailDataUrl);
-      } catch {
-        reject(new Error('Failed to generate thumbnail'));
+        // Ensure dimensions are integers for better rendering
+        canvasWidth = Math.round(Math.max(1, canvasWidth));
+        canvasHeight = Math.round(Math.max(1, canvasHeight));
+        
+        canvas.width = canvasWidth;
+        canvas.height = canvasHeight;
+
+        // Capture frame
+        requestAnimationFrame(() => {
+          try {
+            // Draw the video frame to canvas at its natural aspect ratio
+            ctx.drawImage(
+              video,
+              0, 0, video.videoWidth, video.videoHeight,  // Source rectangle (full video)
+              0, 0, canvasWidth, canvasHeight              // Destination rectangle (scaled to fit)
+            );
+            
+            // Convert canvas to base64 data URL
+            const thumbnailDataUrl = canvas.toDataURL('image/jpeg', quality);
+            
+            // Clean up
+            if (objectUrl) URL.revokeObjectURL(objectUrl);
+            
+            resolve(thumbnailDataUrl);
+          } catch (err) {
+            if (objectUrl) URL.revokeObjectURL(objectUrl);
+            reject(new Error('Failed to generate thumbnail: ' + (err instanceof Error ? err.message : 'Unknown error')));
+          }
+        });
+      } catch (err) {
+        if (objectUrl) URL.revokeObjectURL(objectUrl);
+        reject(new Error('Failed to capture frame'));
       }
     };
 
-    // Load the video file
+    // Wait for frame to decode after seeking
+    video.onseeked = () => {
+      // Add a small delay to ensure the frame is fully decoded
+      // 100ms should be enough for most codecs, including MOV files
+      setTimeout(captureFrame, 100);
+    };
+
+    // Load video
     try {
-      video.src = URL.createObjectURL(videoFile);
+      objectUrl = URL.createObjectURL(videoFile);
+      video.src = objectUrl;
       video.load();
-    } catch {
+    } catch (err) {
       reject(new Error('Failed to create video object URL'));
     }
   });
