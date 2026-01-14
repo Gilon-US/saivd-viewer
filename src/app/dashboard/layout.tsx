@@ -3,12 +3,15 @@
 import {ReactNode} from "react";
 import Link from "next/link";
 import {LogoutButton} from "@/components/auth/LogoutButton";
+import {useAuth} from "@/contexts/AuthContext";
 
 interface DashboardLayoutProps {
   children: ReactNode;
 }
 
 export default function DashboardLayout({children}: DashboardLayoutProps) {
+  const {user} = useAuth();
+  
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
       <div className="flex flex-col">
@@ -24,7 +27,12 @@ export default function DashboardLayout({children}: DashboardLayoutProps) {
                 </Link>
               </nav>
             </div>
-            <div>
+            <div className="flex items-center gap-3">
+              {user?.email && (
+                <span className="text-sm text-gray-600 dark:text-gray-400">
+                  {user.email}
+                </span>
+              )}
               <LogoutButton variant="ghost" size="sm" showIcon={true} />
             </div>
           </div>
