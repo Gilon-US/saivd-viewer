@@ -253,14 +253,14 @@ export function VideoGrid({videos, isLoading, error, onRefresh, onOpenUploadModa
                   <img
                     src={video.preview_thumbnail_data}
                     alt={`${video.filename} - Preview`}
-                    className="object-cover w-full h-full"
+                    className="object-contain w-full h-full"
                   />
                 ) : video.original_thumbnail_url &&
                   !video.original_thumbnail_url.includes("placeholder-video-thumbnail") ? (
                   <Image
                     src={video.original_thumbnail_url}
                     alt={`${video.filename} - Thumbnail`}
-                    className="object-cover"
+                    className="object-contain"
                     fill
                     sizes="240px"
                   />
