@@ -8,7 +8,6 @@ import { Progress } from '@/components/ui/progress';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { LoadingSpinner } from '@/components/ui/loading-spinner';
 import { useVideoUpload, UploadResult } from '@/hooks/useVideoUpload';
-import { v4 as uuidv4 } from 'uuid';
 
 type VideoUploaderProps = {
   onUploadComplete?: (result: UploadResult) => void;
@@ -24,7 +23,6 @@ export function VideoUploader({
   const [selectedVideo, setSelectedVideo] = useState<File | null>(null);
   const [videoPreviewUrl, setVideoPreviewUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [uploadId, setUploadId] = useState<string | null>(null);
   
   const { uploadVideo, cancelUpload, uploads } = useVideoUpload();
   
@@ -49,14 +47,10 @@ export function VideoUploader({
     const videoFile = files.length > 0 ? files[0] : null;
     setSelectedVideo(videoFile);
     setError(null);
-    setUploadId(null);
   };
   
   const handleUpload = async () => {
     if (!selectedVideo || isUploading) return; // Prevent multiple clicks
-    
-    const id = uuidv4();
-    setUploadId(id);
     
     try {
       setError(null);
@@ -74,20 +68,24 @@ export function VideoUploader({
       } else {
         setError('An unknown error occurred during upload');
       }
-      // Reset uploadId on error so user can retry
-      setUploadId(null);
     }
   };
   
   const handleCancel = () => {
-    if (uploadId) {
-      cancelUpload(uploadId);
-      setUploadId(null);
+    if (currentUpload) {
+      cancelUpload(currentUpload.id);
     }
   };
   
-  const currentUpload = uploadId ? uploads[uploadId] : null;
-  const isUploading = currentUpload?.uploading;
+  // Find the upload that matches the selected file
+  const currentUpload = selectedVideo
+    ? Object.values(uploads).find(
+        (upload) => upload.file.name === selectedVideo.name &&
+        upload.file.size === selectedVideo.size &&
+        upload.file.lastModified === selectedVideo.lastModified
+      )
+    : null;
+  const isUploading = currentUpload?.uploading ?? false;
   
   return (
     <div className={`space-y-6 ${className}`}>
@@ -125,11 +123,10 @@ export function VideoUploader({
             <Button 
               variant="outline" 
               onClick={() => {
-                if (uploadId && isUploading) {
+                if (isUploading) {
                   handleCancel();
                 }
                 setSelectedVideo(null);
-                setUploadId(null);
               }}
               disabled={isUploading}
             >
