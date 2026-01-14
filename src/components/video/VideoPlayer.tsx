@@ -218,15 +218,29 @@ export function VideoPlayer({videoUrl, videoId, onClose, isOpen, enableFrameAnal
             </div>
           )}
 
-          {/* QR code overlay - positioned at top-left corner, only show if verified */}
+          {/* QR code/Logo overlay - positioned at top-left corner, only show if verified */}
           {verificationStatus === "verified" && qrUrl && (
-            <div className="absolute top-2 left-2 pointer-events-none z-20">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={qrUrl}
-                alt="Creator QR code"
-                className="w-16 h-16 object-contain rounded-md shadow-md"
-              />
+            <div className="absolute top-2 left-2 pointer-events-none z-20 qr-logo-flip-container">
+              <div className="qr-logo-flip-card">
+                {/* QR Code - Front face */}
+                <div className="qr-logo-flip-face qr-logo-flip-face-front">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={qrUrl}
+                    alt="Creator QR code"
+                    className="w-16 h-16 object-contain rounded-md shadow-md"
+                  />
+                </div>
+                {/* Logo - Back face */}
+                <div className="qr-logo-flip-face qr-logo-flip-face-back">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src="/images/saivd-logo.png"
+                    alt="SAIVD Logo"
+                    className="w-16 h-16 object-contain rounded-md shadow-md"
+                  />
+                </div>
+              </div>
             </div>
           )}
 
