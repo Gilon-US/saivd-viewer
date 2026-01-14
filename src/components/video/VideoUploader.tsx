@@ -53,7 +53,7 @@ export function VideoUploader({
   };
   
   const handleUpload = async () => {
-    if (!selectedVideo) return;
+    if (!selectedVideo || isUploading) return; // Prevent multiple clicks
     
     const id = uuidv4();
     setUploadId(id);
@@ -74,6 +74,8 @@ export function VideoUploader({
       } else {
         setError('An unknown error occurred during upload');
       }
+      // Reset uploadId on error so user can retry
+      setUploadId(null);
     }
   };
   
@@ -117,36 +119,55 @@ export function VideoUploader({
         </Card>
       )}
       
-      {selectedVideo && !isUploading && (
-        <div className="flex justify-end space-x-2">
-          <Button variant="outline" onClick={() => setSelectedVideo(null)}>
-            Cancel
-          </Button>
-          <Button onClick={handleUpload}>
-            Upload Video
-          </Button>
-        </div>
-      )}
-      
-      {isUploading && currentUpload && (
-        <Card>
-          <CardContent className="p-4 space-y-4">
-            <div className="flex items-center gap-3 mb-2">
-              <LoadingSpinner size="sm" />
-              <div className="flex-1">
-                <div className="flex items-center justify-between mb-2">
-                  <p className="font-medium">Uploading video...</p>
-                  <p className="text-sm font-medium text-gray-600 dark:text-gray-400">{currentUpload.progress}%</p>
-                </div>
-                <p className="text-sm text-gray-500 dark:text-gray-400 truncate">{currentUpload.file.name}</p>
-              </div>
-            </div>
-            <Progress value={currentUpload.progress} className="h-2" />
-            <Button variant="outline" onClick={handleCancel} className="w-full">
-              Cancel Upload
+      {selectedVideo && (
+        <>
+          <div className="flex justify-end space-x-2">
+            <Button 
+              variant="outline" 
+              onClick={() => {
+                if (uploadId && isUploading) {
+                  handleCancel();
+                }
+                setSelectedVideo(null);
+                setUploadId(null);
+              }}
+              disabled={isUploading}
+            >
+              {isUploading ? 'Cancel Upload' : 'Clear'}
             </Button>
-          </CardContent>
-        </Card>
+            <Button 
+              onClick={handleUpload}
+              disabled={isUploading}
+            >
+              {isUploading ? (
+                <>
+                  <LoadingSpinner size="sm" className="mr-2" />
+                  Uploading...
+                </>
+              ) : (
+                'Upload Video'
+              )}
+            </Button>
+          </div>
+          
+          {isUploading && currentUpload && (
+            <Card>
+              <CardContent className="p-4 space-y-4">
+                <div className="flex items-center gap-3 mb-2">
+                  <LoadingSpinner size="sm" />
+                  <div className="flex-1">
+                    <div className="flex items-center justify-between mb-2">
+                      <p className="font-medium">Uploading video...</p>
+                      <p className="text-sm font-medium text-gray-600 dark:text-gray-400">{currentUpload.progress}%</p>
+                    </div>
+                    <p className="text-sm text-gray-500 dark:text-gray-400 truncate">{currentUpload.file.name}</p>
+                  </div>
+                </div>
+                <Progress value={currentUpload.progress} className="h-2" />
+              </CardContent>
+            </Card>
+          )}
+        </>
       )}
       
       {error && (
