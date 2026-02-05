@@ -1,6 +1,16 @@
-# SAVD App
+# SAIVD Viewer
 
-A comprehensive video management platform built with Next.js for uploading, processing, and managing videos with Wasabi Cloud Storage integration and watermarking capabilities.
+A **viewer/player** application for uploading, viewing, and verifying watermarked videos. Built with Next.js and Wasabi Cloud Storage.
+
+## Purpose
+
+**SAIVD Viewer is not a “creator” app.** It does not create or apply watermarks to videos. It is the **player only**:
+
+- Users can **upload** videos (which may already be watermarked by another system).
+- Users can **view** their uploaded videos and **see the associated QR code** (derived from the embedded user ID in watermarked videos).
+- The app can call an external **extract user ID** API to read the creator ID from already-watermarked video frames (for verification/QR display).
+
+Watermarking and creator-specific features (e.g. starting watermark jobs, queue status, profile RSA keys) belong in a separate “creator” application and are not part of this codebase.
 
 ## Features
 
@@ -11,7 +21,7 @@ A comprehensive video management platform built with Next.js for uploading, proc
 - 🔐 **Authentication** - Complete user auth system with Supabase
 - 📁 **Drag & drop uploads** with progress tracking
 - 🖼️ **Video Thumbnails** - Automatic thumbnail generation and preview
-- 💧 **Watermarking** - Add watermarks to videos (processing workflow)
+- 📱 **QR / verification** - Read embedded user ID from watermarked videos (via external API) for verification and QR display
 - 🗑️ **Video Deletion** - Safe video deletion with confirmation dialogs
 - 📊 **Upload progress tracking** with real-time feedback
 - 🎉 **Toast notifications** for user feedback
@@ -48,7 +58,7 @@ A comprehensive video management platform built with Next.js for uploading, proc
 1. Clone or navigate to the project directory:
 
    ```bash
-   cd savd-app
+   cd saivd-viewer
    ```
 
 2. Install dependencies:
@@ -134,17 +144,14 @@ src/
 │   ├── api/
 │   │   ├── videos/
 │   │   │   ├── [id]/
-│   │   │   │   └── route.ts      # Video CRUD operations (GET, DELETE)
+│   │   │   │   ├── route.ts           # Video CRUD (GET, DELETE)
+│   │   │   │   ├── play/route.ts      # Presigned play URL (original/watermarked)
+│   │   │   │   └── extract-user-id/   # Extract creator ID from watermarked video (viewer)
 │   │   │   ├── confirm/
-│   │   │   │   └── route.ts      # Video upload confirmation
+│   │   │   │   └── route.ts           # Video upload confirmation
 │   │   │   ├── upload/
-│   │   │   │   └── route.ts      # Pre-signed URL generation
-│   │   │   └── route.ts          # Video listing API
-│   │   ├── callbacks/
-│   │   │   └── watermark/
-│   │   │       └── route.ts      # Watermarking callback handler
-│   │   └── upload/
-│   │       └── route.ts          # Legacy upload endpoint
+│   │   │   │   └── route.ts            # Pre-signed URL generation
+│   │   │   └── route.ts                # Video listing API
 │   ├── dashboard/
 │   │   ├── videos/
 │   │   │   ├── page.tsx          # Main video grid dashboard
@@ -189,7 +196,8 @@ src/
 ├── lib/
 │   ├── utils.ts                  # Utility functions
 │   ├── wasabi.ts                 # Wasabi S3 client configuration
-│   └── watermark.ts              # Watermarking utilities
+│   ├── wasabi-urls.ts             # Presigned URLs, key extraction
+│   └── watermark-api.ts          # Viewer-only: base URL + error helpers for extract_user_id
 ├── utils/
 │   ├── supabase/
 │   │   ├── client.ts             # Supabase client (browser)
@@ -321,11 +329,10 @@ Deletes a video and its associated files from storage.
 ### Video Management Workflow
 
 1. **Upload**: Drag and drop video files or click to select (MP4, MOV, AVI, WEBM supported)
-2. **Processing**: Videos are uploaded to Wasabi storage with automatic thumbnail generation
+2. **Storage**: Videos are uploaded to Wasabi storage with automatic thumbnail generation
 3. **Organization**: View all videos in a responsive grid layout with thumbnails
-4. **Watermarking**: Create watermarked versions of your videos (processing workflow)
+4. **Playback**: Play videos (original or watermarked); QR/verification uses embedded user ID from watermarked videos via external API
 5. **Deletion**: Safely delete videos with confirmation dialogs
-6. **Sharing**: Generate public access links for video sharing (future feature)
 
 ### Supported Features
 
@@ -680,10 +687,7 @@ supabase-local/
 The local Supabase instance is initialized with the following tables:
 
 - **profiles**: User profile information linked to auth.users
-- **videos**: Metadata for uploaded videos
-- **watermarked_videos**: Metadata for watermarked versions of videos
-- **watermarking_jobs**: Tracking watermarking job requests and status
-- **public_access_tokens**: Managing public access tokens for sharing
+- **videos**: Metadata for uploaded videos (including optional processed_url for watermarked files created elsewhere)
 
 ### Troubleshooting Local Supabase
 
@@ -764,7 +768,7 @@ Add this CORS policy to your Wasabi bucket:
 - ✅ **Authentication System**: Complete user registration and login system
 - ✅ **Video Upload**: Drag & drop video uploads with progress tracking
 - ✅ **Thumbnail Generation**: Automatic video thumbnail creation
-- ✅ **Watermarking Workflow**: Infrastructure for video watermarking
+- ✅ **Viewer/player**: Upload and view videos; QR and user-ID extraction for watermarked content
 
 ### Version 1.0.0 - Initial Release
 
@@ -799,4 +803,4 @@ This project is open source and available under the [MIT License](LICENSE).
 
 ---
 
-**SAVD App** - Secure, scalable video management platform built with modern web technologies.
+**SAIVD Viewer** - Viewer/player for uploading, viewing, and verifying watermarked videos. No creator or watermarking features.
