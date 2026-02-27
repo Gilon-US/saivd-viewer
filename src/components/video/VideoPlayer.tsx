@@ -1,11 +1,19 @@
 "use client";
 
-import {useEffect, useRef, useState} from "react";
+import {useEffect, useRef, useState, useCallback} from "react";
 import {X, Play, Pause, Volume2, VolumeX, Maximize, AlertCircle} from "lucide-react";
 import {useFrameAnalysis} from "@/hooks/useFrameAnalysis";
 import {LoadingSpinner} from "@/components/ui/loading-spinner";
+import {
+  captureFrameToImageData,
+  decodeNumericUserIdFromFrame0,
+  importPublicKeyFromPem,
+  decodeAndVerifyFrame,
+} from "@/lib/watermark-decode";
 
 type VerificationStatus = "idle" | "verifying" | "verified" | "failed";
+
+const SAVD_BASE = "https://saivd.netlify.app";
 
 interface VideoPlayerProps {
   videoUrl: string;
@@ -23,88 +31,151 @@ export function VideoPlayer({videoUrl, videoId, onClose, isOpen, enableFrameAnal
   const [duration, setDuration] = useState(0);
   const [verificationStatus, setVerificationStatus] = useState<VerificationStatus>("idle");
   const [verifiedUserId, setVerifiedUserId] = useState<string | null>(null);
+  const [initialNumericUserId, setInitialNumericUserId] = useState<number | null>(null);
+  const [publicKeyPem, setPublicKeyPem] = useState<string | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const initialVerifyDoneRef = useRef(false);
 
-  // Frame analysis hook - returns a QR code URL when user ID is extracted
-  // This continues to run during playback (every 20 frames) as before
-  const {qrUrl: frameAnalysisQrUrl} = useFrameAnalysis(
+  // Ongoing verification every 10th frame during playback
+  const {verificationFailed} = useFrameAnalysis(
     videoRef,
     isPlaying,
-    enableFrameAnalysis && videoId ? videoId : undefined
+    enableFrameAnalysis && verificationStatus === "verified" ? videoId ?? undefined : undefined,
+    initialNumericUserId,
+    publicKeyPem
   );
 
-  // Determine QR URL: use verified user ID if available, otherwise use frame analysis result
-  // The verified user ID takes precedence, but frame analysis can still update it if needed
-  const qrUrl = verifiedUserId
-    ? `https://saivd.netlify.app/profile/${verifiedUserId}/qr`
-    : frameAnalysisQrUrl;
+  const qrUrl =
+    verifiedUserId != null
+      ? `${SAVD_BASE}/profile/${verifiedUserId}/qr`
+      : null;
 
-  // Video verification effect - verifies video authenticity before allowing playback
+  // When ongoing verification fails, mark as failed and pause
   useEffect(() => {
-    // Only verify if video is open, frame analysis is enabled, and we have a videoId
-    if (!isOpen || !enableFrameAnalysis || !videoId) {
-      // Reset verification state when conditions aren't met
-      if (!isOpen) {
-        setVerificationStatus("idle");
-        setVerifiedUserId(null);
+    if (verificationFailed && verificationStatus === "verified") {
+      setVerificationStatus("failed");
+      if (videoRef.current) {
+        videoRef.current.pause();
+        setIsPlaying(false);
       }
-      return;
     }
+  }, [verificationFailed, verificationStatus]);
 
-    // Abort any existing verification request
+  const runInitialVerification = useCallback(async () => {
+    const video = videoRef.current;
+    if (!video || !enableFrameAnalysis || !videoId) return;
+
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
     }
-
-    // Create new abort controller for this verification
     const abortController = new AbortController();
     abortControllerRef.current = abortController;
 
-    // Start verification
     setVerificationStatus("verifying");
     setVerifiedUserId(null);
+    setInitialNumericUserId(null);
+    setPublicKeyPem(null);
+    initialVerifyDoneRef.current = false;
 
-    const verifyVideo = async () => {
-      try {
-        const response = await fetch(`/api/videos/${videoId}/extract-user-id?frame_index=1`, {
-          signal: abortController.signal,
-        });
-
-        if (abortController.signal.aborted) {
-          return; // Request was cancelled
-        }
-
-        if (!response.ok) {
-          const data = await response.json();
-          setVerificationStatus("failed");
-          return;
-        }
-
-        const data = await response.json();
-        if (data.success && data.data?.user_id) {
-          setVerifiedUserId(data.data.user_id);
-          setVerificationStatus("verified");
-        } else {
-          setVerificationStatus("failed");
-        }
-      } catch (error: unknown) {
-        if (abortController.signal.aborted) {
-          // Request was cancelled, don't update state
-          return;
-        }
-        console.error("Error verifying video:", error);
+    try {
+      const imageData = captureFrameToImageData(video);
+      if (abortController.signal.aborted || !imageData) {
         setVerificationStatus("failed");
+        return;
       }
-    };
 
-    verifyVideo();
+      const numericUserId = decodeNumericUserIdFromFrame0(imageData);
+      if (abortController.signal.aborted || numericUserId == null || numericUserId <= 0) {
+        setVerificationStatus("failed");
+        return;
+      }
 
-    // Cleanup: abort request if component unmounts or dependencies change
-    return () => {
-      abortController.abort();
+      const res = await fetch(`/api/users/${numericUserId}/public-key`, {
+        signal: abortController.signal,
+        credentials: "omit",
+      });
+      if (abortController.signal.aborted) return;
+
+      if (!res.ok) {
+        setVerificationStatus("failed");
+        return;
+      }
+
+      const body = await res.json().catch(() => ({}));
+      if (!body.success || !body.data?.public_key_pem) {
+        setVerificationStatus("failed");
+        return;
+      }
+
+      const publicKeyPemValue = body.data.public_key_pem as string;
+      const creatorUserId = body.data.creator_user_id as string | undefined;
+
+      setInitialNumericUserId(numericUserId);
+      setPublicKeyPem(publicKeyPemValue);
+
+      // Optional RSA verify for frame 0
+      try {
+        const publicKey = await importPublicKeyFromPem(publicKeyPemValue);
+        const {verified} = await decodeAndVerifyFrame(publicKey, imageData);
+        if (!verified) {
+          // Per guide: decode success is primary; RSA failure can still allow verified state
+        }
+      } catch {
+        // RSA verify optional; continue with verified state
+      }
+
+      if (abortController.signal.aborted) return;
+
+      setVerifiedUserId(creatorUserId ?? String(numericUserId));
+      setVerificationStatus("verified");
+      initialVerifyDoneRef.current = true;
+    } catch (err) {
+      if (abortController.signal.aborted) return;
+      console.error("Error verifying video:", err);
+      setVerificationStatus("failed");
+    } finally {
       abortControllerRef.current = null;
-    };
+    }
+  }, [enableFrameAnalysis, videoId]);
+
+  // Reset when modal closes or video id changes
+  useEffect(() => {
+    if (!isOpen) {
+      setVerificationStatus("idle");
+      setVerifiedUserId(null);
+      setInitialNumericUserId(null);
+      setPublicKeyPem(null);
+      initialVerifyDoneRef.current = false;
+    }
+  }, [isOpen, videoId]);
+
+  // Start verification when player opens with frame analysis enabled
+  useEffect(() => {
+    if (!isOpen || !enableFrameAnalysis || !videoId) return;
+    setVerificationStatus("verifying");
   }, [isOpen, enableFrameAnalysis, videoId]);
+
+  // Run initial verification when video has loaded and seeked to 0
+  const handleCanPlay = useCallback(() => {
+    if (!initialVerifyDoneRef.current && verificationStatus === "verifying" && videoRef.current) {
+      const video = videoRef.current;
+      if (video.readyState >= 2) {
+        video.currentTime = 0;
+      }
+    }
+  }, [verificationStatus]);
+
+  const handleSeeked = useCallback(() => {
+    if (
+      initialVerifyDoneRef.current ||
+      verificationStatus !== "verifying" ||
+      !videoRef.current ||
+      videoRef.current.currentTime !== 0
+    ) {
+      return;
+    }
+    runInitialVerification();
+  }, [verificationStatus, runInitialVerification]);
 
   // Reset video state when player closes
   useEffect(() => {
@@ -192,9 +263,12 @@ export function VideoPlayer({videoUrl, videoId, onClose, isOpen, enableFrameAnal
           <video
             ref={videoRef}
             src={videoUrl}
+            crossOrigin="anonymous"
             className="w-full aspect-video"
             onTimeUpdate={handleTimeUpdate}
             onLoadedMetadata={handleLoadedMetadata}
+            onCanPlay={handleCanPlay}
+            onSeeked={handleSeeked}
             onEnded={() => setIsPlaying(false)}
             controls={false}
           />

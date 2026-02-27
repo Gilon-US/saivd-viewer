@@ -1,185 +1,154 @@
 "use client";
 
 import {useEffect, useState, useRef, RefObject} from "react";
+import {
+  captureFrameToImageData,
+  decodeNumericUserIdFromFrame0,
+  importPublicKeyFromPem,
+  decodeAndVerifyFrame,
+} from "@/lib/watermark-decode";
+
+const VERIFY_INTERVAL = 10; // Every 10th frame (0, 10, 20, 30, …)
 
 /**
- * Custom hook for analyzing video frames in real-time and extracting user ID from watermarked videos.
- * 
- * This hook:
- * - Counts frames during playback
- * - Extracts user ID every 20 frames via API call
- * - Manages QR code URL state based on extracted user ID
- * - Persists extracted user ID across pause/play/end cycles
- * - Restores QR URL immediately on replay without re-extraction
+ * Custom hook for ongoing watermark verification during playback.
+ *
+ * - Runs only when video is playing and initial verification has passed (videoId + initialNumericUserId set).
+ * - Every 10th frame: captures frame, decodes numeric_user_id, compares with initial; optionally RSA-verifies.
+ * - Sets verificationFailed if decode fails or numeric_user_id does not match.
  *
  * @param videoRef - Reference to the video element
  * @param isPlaying - Whether the video is currently playing
- * @param videoId - Optional video ID for user ID extraction (only for watermarked videos)
- * @returns Object containing qrUrl and showOverlay state
+ * @param videoId - Optional; when set with initialNumericUserId, enables ongoing verification
+ * @param initialNumericUserId - Decoded numeric user ID from frame 0 (from VideoPlayer)
+ * @param publicKeyPem - Optional PEM for RSA verification of each 10th frame
+ * @returns Object containing verificationFailed (true if any 10th-frame check failed)
  */
 export function useFrameAnalysis(
   videoRef: RefObject<HTMLVideoElement | null>,
   isPlaying: boolean,
-  videoId?: string
-): {qrUrl: string | null; showOverlay: boolean} {
-  // React State
-  const [qrUrl, setQrUrl] = useState<string | null>(null);
-  const [extractedUserId, setExtractedUserId] = useState<string | null>(null);
+  videoId?: string,
+  initialNumericUserId?: number | null,
+  publicKeyPem?: string | null
+): {verificationFailed: boolean} {
+  const [verificationFailed, setVerificationFailed] = useState(false);
 
-  // React Refs (persist across renders, don't trigger re-renders)
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const contextRef = useRef<CanvasRenderingContext2D | null>(null);
   const animationFrameRef = useRef<number | null>(null);
-  const skipPixelReadRef = useRef<boolean>(false);
-  const frameCountRef = useRef<number>(0);
-  const lastExtractionFrameRef = useRef<number>(-1);
-  const isExtractingRef = useRef<boolean>(false);
+  const frameCountRef = useRef(0);
+  const lastVerifyFrameRef = useRef(-1);
+  const isVerifyingRef = useRef(false);
 
-  // Initialize canvas for frame capture
-  useEffect(() => {
-    if (!canvasRef.current) {
-      canvasRef.current = document.createElement("canvas");
-      contextRef.current = canvasRef.current.getContext("2d", {
-        willReadFrequently: true,
-      });
-    }
-  }, []);
-
-  // Main frame analysis loop
   useEffect(() => {
     const analyzeFrame = () => {
       const video = videoRef.current;
-      const canvas = canvasRef.current;
-      const context = contextRef.current;
-
-      // Early exit if video not ready
-      if (!video || !canvas || !context || video.paused || video.ended) {
+      if (!video || !videoId || initialNumericUserId == null || initialNumericUserId <= 0) {
+        return;
+      }
+      if (video.paused || video.ended || !isPlaying) {
         return;
       }
 
-      // Handle canvas resize
-      if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
-      }
+      const currentFrame = frameCountRef.current;
 
-      // Draw current frame to canvas
-      context.drawImage(video, 0, 0, canvas.width, canvas.height);
-
-      // Handle tainted canvas (CORS issues)
-      // Note: We don't actually use the imageData for extraction (external service handles that),
-      // but we need to call getImageData to detect CORS errors
-      if (!skipPixelReadRef.current) {
-        try {
-          context.getImageData(0, 0, canvas.width, canvas.height);
-        } catch (error) {
-          if (error instanceof DOMException && error.name === "SecurityError") {
-            skipPixelReadRef.current = true; // Skip pixel reads on subsequent frames
-          } else {
-            throw error;
-          }
+      // Verify every 10th frame (0, 10, 20, 30, …)
+      const isTenthFrame = currentFrame % VERIFY_INTERVAL === 0;
+      if (!isTenthFrame || isVerifyingRef.current) {
+        frameCountRef.current = currentFrame + 1;
+        if (isPlaying) {
+          animationFrameRef.current = requestAnimationFrame(analyzeFrame);
         }
+        return;
       }
 
-      // User ID extraction logic (only if videoId provided)
-      if (videoId && !isExtractingRef.current) {
-        frameCountRef.current += 1;
-
-        // Extract at frame 1 (first frame), then every 20 frames (21, 41, 61, ...)
-        const isFirstExtraction = lastExtractionFrameRef.current === -1;
-        const shouldExtract = isFirstExtraction || frameCountRef.current - lastExtractionFrameRef.current >= 20;
-
-        if (shouldExtract) {
-          const frameIndex = frameCountRef.current;
-          isExtractingRef.current = true;
-          lastExtractionFrameRef.current = frameCountRef.current;
-
-          // Fire-and-forget API call (non-blocking)
-          fetch(`/api/videos/${videoId}/extract-user-id?frame_index=${frameIndex}`)
-            .then(async (response) => {
-              if (!response.ok) {
-                console.warn("[FrameAnalysis] Failed to extract user ID", response.status);
-                return;
-              }
-              const data = await response.json();
-              if (data.success && data.data?.user_id) {
-                setExtractedUserId(data.data.user_id);
-              }
-            })
-            .catch((error) => {
-              console.error("[FrameAnalysis] Error extracting user ID:", error);
-              // Silent failure, extraction will retry on next interval
-            })
-            .finally(() => {
-              isExtractingRef.current = false;
-            });
+      if (currentFrame === lastVerifyFrameRef.current) {
+        if (isPlaying) {
+          animationFrameRef.current = requestAnimationFrame(analyzeFrame);
         }
+        return;
       }
 
-      // Schedule next frame analysis
-      if (isPlaying) {
-        animationFrameRef.current = requestAnimationFrame(analyzeFrame);
+      lastVerifyFrameRef.current = currentFrame;
+      isVerifyingRef.current = true;
+
+      const imageData = captureFrameToImageData(video);
+      if (!imageData) {
+        setVerificationFailed(true);
+        isVerifyingRef.current = false;
+        frameCountRef.current = currentFrame + 1;
+        if (isPlaying) {
+          animationFrameRef.current = requestAnimationFrame(analyzeFrame);
+        }
+        return;
+      }
+
+      const decoded = decodeNumericUserIdFromFrame0(imageData);
+      if (decoded !== initialNumericUserId) {
+        setVerificationFailed(true);
+        isVerifyingRef.current = false;
+        frameCountRef.current = currentFrame + 1;
+        if (isPlaying) {
+          animationFrameRef.current = requestAnimationFrame(analyzeFrame);
+        }
+        return;
+      }
+
+      // Optional RSA verify for this frame
+      if (publicKeyPem) {
+        importPublicKeyFromPem(publicKeyPem)
+          .then((key) => decodeAndVerifyFrame(key, imageData))
+          .then(({verified}) => {
+            if (!verified) {
+              setVerificationFailed(true);
+            }
+          })
+          .catch(() => {
+            // RSA failure can be treated as non-fatal per guide
+          })
+          .finally(() => {
+            isVerifyingRef.current = false;
+            frameCountRef.current = currentFrame + 1;
+            if (isPlaying) {
+              animationFrameRef.current = requestAnimationFrame(analyzeFrame);
+            }
+          });
+      } else {
+        isVerifyingRef.current = false;
+        frameCountRef.current = currentFrame + 1;
+        if (isPlaying) {
+          animationFrameRef.current = requestAnimationFrame(analyzeFrame);
+        }
       }
     };
 
-    // Start analysis loop when playing
-    if (isPlaying) {
+    if (isPlaying && videoId && initialNumericUserId != null && initialNumericUserId > 0) {
+      frameCountRef.current = 0;
       animationFrameRef.current = requestAnimationFrame(analyzeFrame);
     }
 
-    // Cleanup
     return () => {
-      if (animationFrameRef.current !== null) {
+      if (animationFrameRef.current != null) {
         cancelAnimationFrame(animationFrameRef.current);
         animationFrameRef.current = null;
       }
     };
-  }, [videoRef, isPlaying, videoId]);
+  }, [videoRef, isPlaying, videoId, initialNumericUserId, publicKeyPem]);
 
-  // Effect 1: Frame Counter Reset on Playback Stop
+  // Reset verificationFailed and frame count when dependencies change
+  useEffect(() => {
+    if (!videoId || initialNumericUserId == null) {
+      setVerificationFailed(false);
+      frameCountRef.current = 0;
+      lastVerifyFrameRef.current = -1;
+    }
+  }, [videoId, initialNumericUserId]);
+
   useEffect(() => {
     if (!isPlaying) {
-      // Reset frame counters, but preserve extractedUserId and qrUrl
       frameCountRef.current = 0;
-      lastExtractionFrameRef.current = -1;
-      isExtractingRef.current = false;
-    } else {
-      // When video starts playing, restore QR URL if we have extractedUserId
-      if (videoId && extractedUserId && !qrUrl) {
-        const qrUrlFromUserId = `https://saivd.netlify.app/profile/${extractedUserId}/qr`;
-        setQrUrl((currentQrUrl) => {
-          if (currentQrUrl !== qrUrlFromUserId) {
-            return qrUrlFromUserId;
-          }
-          return currentQrUrl;
-        });
-      }
+      lastVerifyFrameRef.current = -1;
+      isVerifyingRef.current = false;
     }
-  }, [isPlaying, videoId, extractedUserId, qrUrl]);
+  }, [isPlaying]);
 
-  // Effect 2: Reset on Video ID Change
-  useEffect(() => {
-    // When videoId changes, reset everything
-    setExtractedUserId(null);
-    setQrUrl(null);
-    frameCountRef.current = 0;
-    lastExtractionFrameRef.current = -1;
-    isExtractingRef.current = false;
-    skipPixelReadRef.current = false;
-  }, [videoId]);
-
-  // Effect 3: Update QR URL When User ID Extracted
-  useEffect(() => {
-    if (videoId && extractedUserId) {
-      const qrUrlFromUserId = `https://saivd.netlify.app/profile/${extractedUserId}/qr`;
-      setQrUrl(qrUrlFromUserId);
-    } else if (!videoId) {
-      setQrUrl(null);
-    }
-  }, [videoId, extractedUserId]);
-
-  return {
-    qrUrl,
-    showOverlay: qrUrl !== null,
-  };
+  return {verificationFailed};
 }

@@ -133,7 +133,7 @@ Recommended route layout:
 
 - `POST /api/videos/[id]/watermark` – Start watermarking for video `[id]`.
 - `GET /api/videos/watermark/status` – Poll: calls external queue_status, updates DB, optionally clears queue.
-- `GET /api/videos/[id]/extract-user-id` – Extract user ID from watermarked video (e.g. for verification).
+- **Verification (this app):** Client-side decode per `docs/FRONTEND_WATERMARK_VERIFICATION_IMPLEMENTATION_GUIDE.md`; public key from `GET /api/users/[numericUserId]/public-key` (no auth). No extract-user-id API.
 
 All routes must:
 

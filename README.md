@@ -145,8 +145,8 @@ src/
 │   │   ├── videos/
 │   │   │   ├── [id]/
 │   │   │   │   ├── route.ts           # Video CRUD (GET, DELETE)
-│   │   │   │   ├── play/route.ts      # Presigned play URL (original/watermarked)
-│   │   │   │   └── extract-user-id/   # Extract creator ID from watermarked video (viewer)
+│   │   │   │   └── play/route.ts      # Presigned play URL (original/watermarked)
+│   │   ├── users/[numericUserId]/public-key/  # GET RSA public key (public, no auth)
 │   │   │   ├── confirm/
 │   │   │   │   └── route.ts           # Video upload confirmation
 │   │   │   ├── upload/
@@ -197,7 +197,8 @@ src/
 │   ├── utils.ts                  # Utility functions
 │   ├── wasabi.ts                 # Wasabi S3 client configuration
 │   ├── wasabi-urls.ts             # Presigned URLs, key extraction
-│   └── watermark-api.ts          # Viewer-only: base URL + error helpers for extract_user_id
+│   ├── watermark-decode.ts       # Client-side decode + RSA verify (see docs/FRONTEND_WATERMARK_VERIFICATION_IMPLEMENTATION_GUIDE.md)
+│   └── watermark-api.ts          # Legacy error helpers (optional)
 ├── utils/
 │   ├── supabase/
 │   │   ├── client.ts             # Supabase client (browser)

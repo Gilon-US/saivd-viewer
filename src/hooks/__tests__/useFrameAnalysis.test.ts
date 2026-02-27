@@ -1,279 +1,95 @@
-import { renderHook, act } from '@testing-library/react';
-import { useFrameAnalysis, FrameData, FrameAnalysisFunction } from '../useFrameAnalysis';
-import { RefObject } from 'react';
+import { renderHook, act } from "@testing-library/react";
+import { useFrameAnalysis } from "../useFrameAnalysis";
+import { RefObject } from "react";
 
-describe('useFrameAnalysis', () => {
+jest.mock("@/lib/watermark-decode", () => ({
+  captureFrameToImageData: jest.fn(),
+  decodeNumericUserIdFromFrame0: jest.fn(),
+  importPublicKeyFromPem: jest.fn(),
+  decodeAndVerifyFrame: jest.fn(),
+}));
+
+const { captureFrameToImageData, decodeNumericUserIdFromFrame0 } =
+  require("@/lib/watermark-decode") as {
+    captureFrameToImageData: jest.Mock;
+    decodeNumericUserIdFromFrame0: jest.Mock;
+  };
+
+describe("useFrameAnalysis", () => {
   let mockVideo: Partial<HTMLVideoElement>;
   let videoRef: RefObject<HTMLVideoElement>;
-  let mockCanvas: Partial<HTMLCanvasElement>;
-  let mockContext: Partial<CanvasRenderingContext2D>;
 
   beforeEach(() => {
-    // Mock video element
     mockVideo = {
-      paused: true,
+      paused: false,
       ended: false,
       currentTime: 0,
-      videoWidth: 1920,
-      videoHeight: 1080,
+      videoWidth: 320,
+      videoHeight: 240,
     };
+    videoRef = { current: mockVideo as HTMLVideoElement };
 
-    videoRef = {
-      current: mockVideo as HTMLVideoElement,
-    };
-
-    // Mock canvas and context
-    mockContext = {
-      drawImage: jest.fn(),
-      getImageData: jest.fn(() => ({
-        data: new Uint8ClampedArray(1920 * 1080 * 4),
-        width: 1920,
-        height: 1080,
-        colorSpace: 'srgb',
-      } as ImageData)),
-    };
-
-    mockCanvas = {
-      width: 0,
-      height: 0,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      getContext: jest.fn(() => mockContext as CanvasRenderingContext2D) as any,
-    };
-
-    // Mock document.createElement for canvas
-    jest.spyOn(document, 'createElement').mockImplementation((tagName: string) => {
-      if (tagName === 'canvas') {
-        return mockCanvas as HTMLCanvasElement;
-      }
-      return document.createElement(tagName);
-    });
-
-    // Mock requestAnimationFrame and cancelAnimationFrame
-    global.requestAnimationFrame = jest.fn((cb) => {
+    global.requestAnimationFrame = jest.fn((cb: FrameRequestCallback) => {
       setTimeout(cb, 16);
       return 1;
     });
     global.cancelAnimationFrame = jest.fn();
 
-    // Mock performance.now
-    jest.spyOn(performance, 'now').mockReturnValue(1000);
+    (captureFrameToImageData as jest.Mock).mockReturnValue({
+      data: new Uint8ClampedArray(320 * 240 * 4),
+      width: 320,
+      height: 240,
+    });
+    (decodeNumericUserIdFromFrame0 as jest.Mock).mockReturnValue(123);
   });
 
-  afterEach(() => {
-    jest.restoreAllMocks();
+  it("returns verificationFailed false initially", () => {
+    const { result } = renderHook(() =>
+      useFrameAnalysis(videoRef, false, undefined, null, null)
+    );
+    expect(result.current.verificationFailed).toBe(false);
   });
 
-  it('initializes with showOverlay as false', () => {
-    const { result } = renderHook(() => useFrameAnalysis(videoRef, false));
-    
-    expect(result.current.showOverlay).toBe(false);
-  });
-
-  it('does not start analysis when video is not playing', () => {
-    renderHook(() => useFrameAnalysis(videoRef, false));
-    
+  it("does not start loop when not playing", () => {
+    renderHook(() =>
+      useFrameAnalysis(videoRef, false, "vid-1", 123, null)
+    );
     expect(global.requestAnimationFrame).not.toHaveBeenCalled();
   });
 
-  it('starts analysis when video is playing', () => {
-    renderHook(() => useFrameAnalysis(videoRef, true));
-    
+  it("does not start loop when initialNumericUserId is null", () => {
+    renderHook(() =>
+      useFrameAnalysis(videoRef, true, "vid-1", null, null)
+    );
+    expect(global.requestAnimationFrame).not.toHaveBeenCalled();
+  });
+
+  it("starts loop when playing with videoId and initialNumericUserId", () => {
+    renderHook(() =>
+      useFrameAnalysis(videoRef, true, "vid-1", 123, null)
+    );
     expect(global.requestAnimationFrame).toHaveBeenCalled();
   });
 
-  it('creates canvas with correct dimensions', async () => {
-    const { result } = renderHook(() => useFrameAnalysis(videoRef, true));
-    
-    await act(async () => {
-      await new Promise(resolve => setTimeout(resolve, 20));
-    });
-    
-    expect(mockCanvas.width).toBe(1920);
-    expect(mockCanvas.height).toBe(1080);
-  });
-
-  it('calls analysis function with frame data', async () => {
-    const mockAnalysisFunction = jest.fn(() => false);
-    
-    renderHook(() => useFrameAnalysis(videoRef, true, mockAnalysisFunction));
-    
-    await act(async () => {
-      await new Promise(resolve => setTimeout(resolve, 20));
-    });
-    
-    expect(mockAnalysisFunction).toHaveBeenCalled();
-    const frameData = mockAnalysisFunction.mock.calls[0]?.[0] as FrameData;
-    expect(frameData).toHaveProperty('canvas');
-    expect(frameData).toHaveProperty('context');
-    expect(frameData).toHaveProperty('imageData');
-    expect(frameData).toHaveProperty('timestamp');
-    expect(frameData).toHaveProperty('videoTime');
-  });
-
-  it('updates showOverlay based on analysis function result', async () => {
-    const mockAnalysisFunction: FrameAnalysisFunction = () => true;
-    
-    const { result } = renderHook(() => 
-      useFrameAnalysis(videoRef, true, mockAnalysisFunction)
+  it("sets verificationFailed when decode returns null", async () => {
+    (decodeNumericUserIdFromFrame0 as jest.Mock).mockReturnValue(null);
+    const { result } = renderHook(() =>
+      useFrameAnalysis(videoRef, true, "vid-1", 123, null)
     );
-    
     await act(async () => {
-      await new Promise(resolve => setTimeout(resolve, 20));
+      await new Promise((r) => setTimeout(r, 50));
     });
-    
-    expect(result.current.showOverlay).toBe(true);
+    expect(result.current.verificationFailed).toBe(true);
   });
 
-  it('handles analysis function errors gracefully', async () => {
-    const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation();
-    const errorAnalysisFunction: FrameAnalysisFunction = () => {
-      throw new Error('Analysis error');
-    };
-    
-    const { result } = renderHook(() => 
-      useFrameAnalysis(videoRef, true, errorAnalysisFunction)
+  it("sets verificationFailed when decode does not match initialNumericUserId", async () => {
+    (decodeNumericUserIdFromFrame0 as jest.Mock).mockReturnValue(456);
+    const { result } = renderHook(() =>
+      useFrameAnalysis(videoRef, true, "vid-1", 123, null)
     );
-    
     await act(async () => {
-      await new Promise(resolve => setTimeout(resolve, 20));
+      await new Promise((r) => setTimeout(r, 50));
     });
-    
-    expect(consoleErrorSpy).toHaveBeenCalledWith(
-      'Error in frame analysis:',
-      expect.any(Error)
-    );
-    expect(result.current.showOverlay).toBe(false);
-    
-    consoleErrorSpy.mockRestore();
-  });
-
-  it('stops analysis when video is paused', async () => {
-    const { rerender } = renderHook(
-      ({ isPlaying }) => useFrameAnalysis(videoRef, isPlaying),
-      { initialProps: { isPlaying: true } }
-    );
-    
-    await act(async () => {
-      await new Promise(resolve => setTimeout(resolve, 20));
-    });
-    
-    const callCountWhilePlaying = (global.requestAnimationFrame as jest.Mock).mock.calls.length;
-    
-    // Pause the video
-    rerender({ isPlaying: false });
-    
-    await act(async () => {
-      await new Promise(resolve => setTimeout(resolve, 20));
-    });
-    
-    // Should not have made additional requestAnimationFrame calls
-    expect((global.requestAnimationFrame as jest.Mock).mock.calls.length).toBe(callCountWhilePlaying);
-  });
-
-  it('resets overlay when video stops playing', () => {
-    const { result, rerender } = renderHook(
-      ({ isPlaying }) => useFrameAnalysis(videoRef, isPlaying),
-      { initialProps: { isPlaying: true } }
-    );
-    
-    act(() => {
-      rerender({ isPlaying: false });
-    });
-    
-    expect(result.current.showOverlay).toBe(false);
-  });
-
-  it('cleans up animation frame on unmount', () => {
-    const { unmount } = renderHook(() => useFrameAnalysis(videoRef, true));
-    
-    unmount();
-    
-    expect(global.cancelAnimationFrame).toHaveBeenCalled();
-  });
-
-  it('does not analyze if video element is null', () => {
-    const nullVideoRef: RefObject<HTMLVideoElement | null> = { current: null };
-    const mockAnalysisFunction = jest.fn(() => false);
-    
-    renderHook(() => useFrameAnalysis(nullVideoRef, true, mockAnalysisFunction));
-    
-    expect(mockAnalysisFunction).not.toHaveBeenCalled();
-  });
-
-  it('does not analyze if video is ended', async () => {
-    Object.defineProperty(mockVideo, 'ended', { value: true, writable: true });
-    const mockAnalysisFunction = jest.fn(() => false);
-    
-    renderHook(() => useFrameAnalysis(videoRef, true, mockAnalysisFunction));
-    
-    await act(async () => {
-      await new Promise(resolve => setTimeout(resolve, 20));
-    });
-    
-    expect(mockAnalysisFunction).not.toHaveBeenCalled();
-  });
-
-  it('uses default analysis function when none provided', async () => {
-    const { result } = renderHook(() => useFrameAnalysis(videoRef, true));
-    
-    await act(async () => {
-      await new Promise(resolve => setTimeout(resolve, 20));
-    });
-    
-    // Default function returns false
-    expect(result.current.showOverlay).toBe(false);
-  });
-
-  it('draws video frame to canvas', async () => {
-    renderHook(() => useFrameAnalysis(videoRef, true));
-    
-    await act(async () => {
-      await new Promise(resolve => setTimeout(resolve, 20));
-    });
-    
-    expect(mockContext.drawImage).toHaveBeenCalledWith(
-      mockVideo,
-      0,
-      0,
-      1920,
-      1080
-    );
-  });
-
-  it('gets image data from canvas', async () => {
-    renderHook(() => useFrameAnalysis(videoRef, true));
-    
-    await act(async () => {
-      await new Promise(resolve => setTimeout(resolve, 20));
-    });
-    
-    expect(mockContext.getImageData).toHaveBeenCalledWith(0, 0, 1920, 1080);
-  });
-
-  it('includes correct video time in frame data', async () => {
-    mockVideo.currentTime = 5.5;
-    const mockAnalysisFunction = jest.fn(() => false);
-    
-    renderHook(() => useFrameAnalysis(videoRef, true, mockAnalysisFunction));
-    
-    await act(async () => {
-      await new Promise(resolve => setTimeout(resolve, 20));
-    });
-    
-    const frameData = mockAnalysisFunction.mock.calls[0]?.[0] as FrameData;
-    expect(frameData.videoTime).toBe(5.5);
-  });
-
-  it('includes performance timestamp in frame data', async () => {
-    const mockAnalysisFunction = jest.fn(() => false);
-    
-    renderHook(() => useFrameAnalysis(videoRef, true, mockAnalysisFunction));
-    
-    await act(async () => {
-      await new Promise(resolve => setTimeout(resolve, 20));
-    });
-    
-    const frameData = mockAnalysisFunction.mock.calls[0]?.[0] as FrameData;
-    expect(frameData.timestamp).toBe(1000);
+    expect(result.current.verificationFailed).toBe(true);
   });
 });
