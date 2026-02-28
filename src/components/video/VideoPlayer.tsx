@@ -37,6 +37,8 @@ export function VideoPlayer({videoUrl, videoId, onClose, isOpen, enableFrameAnal
   const [publicKeyPem, setPublicKeyPem] = useState<string | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const initialVerifyDoneRef = useRef(false);
+  /** Guard: set as soon as we start verification so we don't run again on every seeked event. */
+  const verificationStartedRef = useRef(false);
 
   // Ongoing verification every 10th frame during playback
   const {verificationFailed} = useFrameAnalysis(
@@ -66,6 +68,8 @@ export function VideoPlayer({videoUrl, videoId, onClose, isOpen, enableFrameAnal
   const runInitialVerification = useCallback(async () => {
     const video = videoRef.current;
     if (!video || !enableFrameAnalysis || !videoId) return;
+    if (verificationStartedRef.current) return;
+    verificationStartedRef.current = true;
 
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
@@ -137,6 +141,7 @@ export function VideoPlayer({videoUrl, videoId, onClose, isOpen, enableFrameAnal
       setVerificationStatus("failed");
     } finally {
       abortControllerRef.current = null;
+      verificationStartedRef.current = false;
     }
   }, [enableFrameAnalysis, videoId]);
 
@@ -148,6 +153,7 @@ export function VideoPlayer({videoUrl, videoId, onClose, isOpen, enableFrameAnal
       setInitialNumericUserId(null);
       setPublicKeyPem(null);
       initialVerifyDoneRef.current = false;
+      verificationStartedRef.current = false;
     }
   }, [isOpen, videoId]);
 
@@ -169,6 +175,7 @@ export function VideoPlayer({videoUrl, videoId, onClose, isOpen, enableFrameAnal
 
   const handleSeeked = useCallback(() => {
     if (
+      verificationStartedRef.current ||
       initialVerifyDoneRef.current ||
       verificationStatus !== "verifying" ||
       !videoRef.current ||
