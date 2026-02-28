@@ -133,7 +133,7 @@ Recommended route layout:
 
 - `POST /api/videos/[id]/watermark` – Start watermarking for video `[id]`.
 - `GET /api/videos/watermark/status` – Poll: calls external queue_status, updates DB, optionally clears queue.
-- **Verification (this app):** Client-side decode per `docs/FRONTEND_WATERMARK_VERIFICATION_IMPLEMENTATION_GUIDE.md`; public key from `GET /api/users/[numericUserId]/public-key` (no auth). No extract-user-id API.
+- **Verification (this app):** Client-side decode per `docs/FRONTEND_WATERMARK_VERIFICATION_IMPLEMENTATION_GUIDE.md`; public key from the **external** SAIVD API `GET https://saivd.netlify.app/api/users/[numericUserId]/public-key` (no auth). This app does not host a public-key route.
 
 All routes must:
 

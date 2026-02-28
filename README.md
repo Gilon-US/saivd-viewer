@@ -146,7 +146,6 @@ src/
 │   │   │   ├── [id]/
 │   │   │   │   ├── route.ts           # Video CRUD (GET, DELETE)
 │   │   │   │   └── play/route.ts      # Presigned play URL (original/watermarked)
-│   │   ├── users/[numericUserId]/public-key/  # GET RSA public key (public, no auth)
 │   │   │   ├── confirm/
 │   │   │   │   └── route.ts           # Video upload confirmation
 │   │   │   ├── upload/

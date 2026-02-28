@@ -54,8 +54,7 @@ export async function updateSession(request: NextRequest) {
     !pathname.startsWith("/api/auth") &&
     !pathname.startsWith("/api/auth-test") &&
     !pathname.startsWith("/api/videos/upload") && // Allow upload endpoint (handles its own auth)
-    !pathname.startsWith("/api/callbacks") &&
-    !pathname.match(/^\/api\/users\/[^/]+\/public-key$/); // Public key endpoint (no auth)
+    !pathname.startsWith("/api/callbacks");
 
   // Redirect if accessing protected route without authentication
   if (isProtectedRoute && !user) {

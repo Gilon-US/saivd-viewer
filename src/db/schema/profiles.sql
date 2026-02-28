@@ -5,14 +5,12 @@ CREATE TABLE IF NOT EXISTS public.profiles (
   display_name TEXT,
   avatar_url TEXT,
   numeric_user_id INTEGER UNIQUE,
-  public_key_pem TEXT,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
 -- Add columns for existing tables (no-op if already present)
 ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS numeric_user_id INTEGER;
-ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS public_key_pem TEXT;
 
 -- Enable Row Level Security
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
@@ -34,9 +32,6 @@ CREATE POLICY "Users can update their own profile"
 
 -- Create index for email lookups
 CREATE INDEX IF NOT EXISTS idx_profiles_email ON public.profiles(email);
-
--- Index for public-key lookup by numeric_user_id
-CREATE UNIQUE INDEX IF NOT EXISTS idx_profiles_numeric_user_id ON public.profiles(numeric_user_id) WHERE numeric_user_id IS NOT NULL;
 
 -- Create function to handle new user creation
 CREATE OR REPLACE FUNCTION public.handle_new_user()

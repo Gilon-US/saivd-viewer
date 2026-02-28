@@ -13,7 +13,9 @@ import {
 
 type VerificationStatus = "idle" | "verifying" | "verified" | "failed";
 
-const SAVD_BASE = "https://saivd.netlify.app";
+/** External SAIVD API origin for public key and profile/QR. Override via NEXT_PUBLIC_SAIVD_API_URL. */
+const SAIVD_API_ORIGIN =
+  process.env.NEXT_PUBLIC_SAIVD_API_URL ?? "https://saivd.netlify.app";
 
 interface VideoPlayerProps {
   videoUrl: string;
@@ -47,7 +49,7 @@ export function VideoPlayer({videoUrl, videoId, onClose, isOpen, enableFrameAnal
 
   const qrUrl =
     verifiedUserId != null
-      ? `${SAVD_BASE}/profile/${verifiedUserId}/qr`
+      ? `${SAIVD_API_ORIGIN}/profile/${verifiedUserId}/qr`
       : null;
 
   // When ongoing verification fails, mark as failed and pause
@@ -90,10 +92,10 @@ export function VideoPlayer({videoUrl, videoId, onClose, isOpen, enableFrameAnal
         return;
       }
 
-      const res = await fetch(`/api/users/${numericUserId}/public-key`, {
-        signal: abortController.signal,
-        credentials: "omit",
-      });
+      const res = await fetch(
+        `${SAIVD_API_ORIGIN}/api/users/${numericUserId}/public-key`,
+        { signal: abortController.signal, credentials: "omit" }
+      );
       if (abortController.signal.aborted) return;
 
       if (!res.ok) {

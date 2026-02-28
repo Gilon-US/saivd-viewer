@@ -38,9 +38,6 @@ src/
 │   │   │   └── [id]/
 │   │   │       ├── route.ts       # GET/DELETE single video
 │   │   │       └── play/route.ts  # Presigned playback URL (?variant=watermarked)
-│   │   ├── users/
-│   │   │   └── [numericUserId]/
-│   │   │       └── public-key/route.ts  # GET RSA public key (public, no auth)
 │   │   ├── profile/[userId]/      # Public profile API (if implemented)
 │   │   ├── health/route.ts
 │   │   └── auth-test/route.ts
@@ -100,7 +97,8 @@ src/
 |----------|-------------|----------|
 | `NEXT_PUBLIC_SUPABASE_URL` | Supabase project URL | Yes |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase anon key | Yes |
-| `SUPABASE_SERVICE_ROLE_KEY` | Service role key (server) | For DB setup and public-key API (profiles by numeric_user_id) |
+| `SUPABASE_SERVICE_ROLE_KEY` | Service role key (server) | For DB setup only |
+| `NEXT_PUBLIC_SAIVD_API_URL` | Base URL for external SAIVD API (public key, profile/QR). Default `https://saivd.netlify.app` | No |
 | `WASABI_REGION` | Wasabi region | Yes |
 | `WASABI_ENDPOINT` | Wasabi S3 endpoint (e.g. `https://s3.us-east-1.wasabisys.com`) | Yes |
 | `WASABI_ACCESS_KEY_ID` | Wasabi access key | Yes |
@@ -135,7 +133,7 @@ Copy `.env.example` to `.env.local` and fill in values.
 
 ### `profiles`
 
-Defined in `src/db/schema/profiles.sql`. Includes `numeric_user_id` (integer, unique) and `public_key_pem` (text) for watermark verification. Run `npx tsx src/db/setup-profiles.ts` to apply.
+Defined in `src/db/schema/profiles.sql`. Run `npx tsx src/db/setup-profiles.ts` to apply. This app does not store public keys; they are fetched from the external SAIVD API.
 
 ---
 
@@ -145,7 +143,7 @@ Defined in `src/db/schema/profiles.sql`. Includes `numeric_user_id` (integer, un
 - **Auth context**: `AuthContext` provides `user`, `session`, `signIn`, `signUp`, `signOut`, `refreshSession`.
 - **Protected routes**: `/dashboard/*`, `/videos/*` require auth; unauthenticated users redirect to `/login`.
 - **Auth routes**: `/login`, `/register` redirect to `/dashboard/videos` if already logged in.
-- **API protection**: Most `/api/*` routes require auth. Exceptions: `/api/health`, `/api/auth*`, `/api/videos/upload`, `/api/callbacks`, `/api/users/[numericUserId]/public-key` (public, no auth). Add `/api/profile/*` if public profile API exists.
+- **API protection**: Most `/api/*` routes require auth. Exceptions: `/api/health`, `/api/auth*`, `/api/videos/upload`, `/api/callbacks`. Add `/api/profile/*` if public profile API exists.
 - **Password reset**: Forgot password → `resetPasswordForEmail` with `redirectTo: origin/reset-password`. Reset page uses `updateUser({ password })`; Supabase reads recovery token from URL hash.
 
 **Do not add logic between `createServerClient` and `supabase.auth.getUser()` in middleware** — can cause random logouts.
@@ -168,14 +166,12 @@ Thumbnail generation is client-side in `utils/videoThumbnail.ts` (canvas + video
 
 1. **Grid**: User clicks thumbnail → `GET /api/videos/[id]/play?variant=watermarked` → receives presigned URL.
 2. **Player**: `VideoPlayer` opens with that URL. Video has `crossOrigin="anonymous"` for canvas access.
-3. **Verification**: On open, video loads; when `loadeddata` and `seeked` (at `currentTime = 0`), frame 0 is captured and decoded in-browser via `watermark-decode.ts` (luma, patch matrix, right-side row sums). Decoded `numeric_user_id` is used to call `GET /api/users/{numericUserId}/public-key` (no auth). If decode or fetch fails → "This video is not authentic". Optional RSA verify with the returned PEM; decode success is primary.
+3. **Verification**: On open, video loads; when `loadeddata` and `seeked` (at `currentTime = 0`), frame 0 is captured and decoded in-browser via `watermark-decode.ts` (luma, patch matrix, right-side row sums). Decoded `numeric_user_id` is used to fetch the public key from the **external** SAIVD API: `GET {NEXT_PUBLIC_SAIVD_API_URL}/api/users/{numericUserId}/public-key` (default origin `https://saivd.netlify.app`). If decode or fetch fails → "This video is not authentic". Optional RSA verify with the returned PEM; decode success is primary. After the key is returned, verification (frame 0 and every 10th frame) is done locally; no further calls to the external API for that playback.
 4. **Ongoing verification**: During playback, `useFrameAnalysis` runs every 10th frame (0, 10, 20, …): decode and compare with initial `numeric_user_id`; if mismatch or decode fails → set `verificationFailed`, VideoPlayer pauses and shows "not authentic".
-5. **QR URL**: From public-key response `creator_user_id` (UUID) or numeric id: `https://saivd.netlify.app/profile/{user_id}/qr`.
+5. **QR URL**: From public-key response `creator_user_id` (UUID) or numeric id: `{NEXT_PUBLIC_SAIVD_API_URL}/profile/{user_id}/qr`.
 6. **Overlay**: QR code + logo flip animation (see `docs/qr-logo-flip-animation-implementation-guide.md`). Shown only when `verificationStatus === "verified"` and `qrUrl` is set.
 
-**Public-key API** (`GET /api/users/[numericUserId]/public-key`):
-- Public, unauthenticated. Returns `{ success, data: { public_key_pem, creator_user_id? } }`.
-- Used by this app and third-party apps. See `docs/FRONTEND_WATERMARK_VERIFICATION_IMPLEMENTATION_GUIDE.md`.
+**Public keys**: This app does not expose or store public keys. It calls the external SAIVD API (saivd.netlify.app, or `NEXT_PUBLIC_SAIVD_API_URL`) once per playback to get the public key for the decoded `numeric_user_id`; that key is then used only in the browser for verification. See `docs/FRONTEND_WATERMARK_VERIFICATION_IMPLEMENTATION_GUIDE.md`.
 
 ---
 
