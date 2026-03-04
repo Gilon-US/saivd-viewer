@@ -1,6 +1,7 @@
 /**
  * Client-side watermark decode and RSA verification.
  * Matches the algorithms in docs/FRONTEND_WATERMARK_VERIFICATION_IMPLEMENTATION_GUIDE.md.
+ * User ID decode (9-digit encoding) follows docs/FRONTEND_USER_ID_DECODE_UPDATE.md.
  */
 
 export const PATCH_SIZE = 16;
@@ -126,16 +127,21 @@ export function mode(arr: number[]): number | null {
   return best;
 }
 
+/**
+ * Decode numeric user ID from right-side row sums (frame 0 or any frame).
+ * Backend encodes a fixed 9-digit decimal string, left-padded with zeros.
+ * Uses dynamic repsUsed = min(7, floor(rightSide.length / 9)); 9 groups of repsUsed; digit = mode per group.
+ * Does not strip trailing zeros.
+ */
 export function decodeNumericUserIdFromRightSide(rightSide: number[]): number | null {
-  const usable = rightSide.length - (rightSide.length % REPS);
-  const numGroups = Math.floor(usable / REPS);
-  if (numGroups === 0) return null;
+  const repsUsed = Math.min(7, Math.floor(rightSide.length / 9));
+  if (repsUsed === 0) return null;
 
-  const maxDigits = Math.min(numGroups, USER_ID_DIGITS);
+  const values = rightSide.slice(0, 9 * repsUsed);
   const digits: number[] = [];
 
-  for (let d = 0; d < maxDigits; d++) {
-    const group = rightSide.slice(d * REPS, (d + 1) * REPS);
+  for (let d = 0; d < USER_ID_DIGITS; d++) {
+    const group = values.slice(d * repsUsed, (d + 1) * repsUsed);
     const m = mode(group);
     if (m === null || m < 0 || m > 9) {
       return null;
@@ -143,12 +149,9 @@ export function decodeNumericUserIdFromRightSide(rightSide: number[]): number | 
     digits.push(m);
   }
 
-  let str = digits.join("");
-  str = str.replace(/0+$/, "");
-  if (!str) return null;
-
-  const parsed = parseInt(str, 10);
-  return Number.isNaN(parsed) ? null : parsed;
+  const digitStr = digits.join("");
+  const numericUserId = parseInt(digitStr, 10);
+  return Number.isNaN(numericUserId) ? null : numericUserId;
 }
 
 export function decodeNumericUserIdFromFrame0(imageData: ImageData): number | null {

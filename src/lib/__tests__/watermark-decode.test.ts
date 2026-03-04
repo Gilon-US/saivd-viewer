@@ -41,20 +41,20 @@ describe("watermark-decode", () => {
     it("returns null for empty array", () => {
       expect(decodeNumericUserIdFromRightSide([])).toBeNull();
     });
-    it("returns null when fewer than REPS values", () => {
+    it("returns null when fewer than 9 values (repsUsed would be 0)", () => {
       expect(decodeNumericUserIdFromRightSide([1, 2, 3])).toBeNull();
     });
-    it("decodes single digit from 7 repeated values", () => {
-      const seven = Array(7).fill(5);
-      expect(decodeNumericUserIdFromRightSide(seven)).toBe(5);
+    it("decodes 9-digit string from 9 groups of 1 (repsUsed=1)", () => {
+      const nineOnes = Array(9).fill(1);
+      expect(decodeNumericUserIdFromRightSide(nineOnes)).toBe(111111111);
     });
-    it("strips trailing zeros (backend rstrip)", () => {
-      const digits = [...Array(7).fill(1), ...Array(7).fill(0)]; // 1 then 0
-      expect(decodeNumericUserIdFromRightSide(digits)).toBe(1);
+    it("decodes fixed 9 digits without stripping trailing zeros", () => {
+      const rightSide = Array(9).fill(0);
+      rightSide[8] = 1;
+      expect(decodeNumericUserIdFromRightSide(rightSide)).toBe(1);
     });
     it("returns null when digit out of range", () => {
-      const invalid = [...Array(7).fill(10)]; // 10 is not 0-9
-      expect(decodeNumericUserIdFromRightSide(invalid)).toBeNull();
+      expect(decodeNumericUserIdFromRightSide(Array(9).fill(10))).toBeNull();
     });
   });
 
