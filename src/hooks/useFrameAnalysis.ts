@@ -37,11 +37,6 @@ export function useFrameAnalysis(
   const frameCountRef = useRef(0);
   const lastVerifyFrameRef = useRef(-1);
   const isVerifyingRef = useRef(false);
-  /** Consecutive 10th-frames where decode returned null; fail only after this exceeds tolerance. */
-  const consecutiveNullDecodesRef = useRef(0);
-
-  const MAX_CONSECUTIVE_NULL_DECODES = 4;
-
   useEffect(() => {
     const analyzeFrame = () => {
       const video = videoRef.current;
@@ -93,12 +88,8 @@ export function useFrameAnalysis(
       }
 
       if (decoded === null) {
-        consecutiveNullDecodesRef.current += 1;
-        if (consecutiveNullDecodesRef.current >= MAX_CONSECUTIVE_NULL_DECODES) {
-          console.warn("[useFrameAnalysis] Too many consecutive decode failures (null) at frame", currentFrame);
-          setVerificationFailed(true);
-        } else {
-          console.log("[useFrameAnalysis] Decode null at frame", currentFrame, "(tolerant, need", MAX_CONSECUTIVE_NULL_DECODES - consecutiveNullDecodesRef.current, "more consecutive to fail)");
+        if (currentFrame <= 60 || currentFrame % 50 === 0) {
+          console.log("[useFrameAnalysis] Decode null at frame", currentFrame, "(skipped, only mismatch fails)");
         }
         isVerifyingRef.current = false;
         frameCountRef.current = currentFrame + 1;
@@ -107,8 +98,6 @@ export function useFrameAnalysis(
         }
         return;
       }
-
-      consecutiveNullDecodesRef.current = 0;
 
       if (decoded !== initialNumericUserId) {
         console.warn("[useFrameAnalysis] Decode mismatch:", {
@@ -155,7 +144,6 @@ export function useFrameAnalysis(
 
     if (isPlaying && videoId && initialNumericUserId != null && initialNumericUserId > 0) {
       frameCountRef.current = 0;
-      consecutiveNullDecodesRef.current = 0;
       console.log("[useFrameAnalysis] Verification loop started", {
         videoId,
         initialNumericUserId,
@@ -178,7 +166,6 @@ export function useFrameAnalysis(
       setVerificationFailed(false);
       frameCountRef.current = 0;
       lastVerifyFrameRef.current = -1;
-      consecutiveNullDecodesRef.current = 0;
     }
   }, [videoId, initialNumericUserId]);
 
@@ -187,7 +174,6 @@ export function useFrameAnalysis(
       frameCountRef.current = 0;
       lastVerifyFrameRef.current = -1;
       isVerifyingRef.current = false;
-      consecutiveNullDecodesRef.current = 0;
     }
   }, [isPlaying]);
 

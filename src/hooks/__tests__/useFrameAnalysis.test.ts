@@ -71,18 +71,7 @@ describe("useFrameAnalysis", () => {
     expect(global.requestAnimationFrame).toHaveBeenCalled();
   });
 
-  it("tolerates single decode null (verificationFailed stays false)", async () => {
-    (decodeNumericUserIdFromFrame0 as jest.Mock).mockReturnValue(null);
-    const { result } = renderHook(() =>
-      useFrameAnalysis(videoRef, true, "vid-1", 123, null)
-    );
-    await act(async () => {
-      await new Promise((r) => setTimeout(r, 50));
-    });
-    expect(result.current.verificationFailed).toBe(false);
-  });
-
-  it("sets verificationFailed after four consecutive decode nulls", async () => {
+  it("never sets verificationFailed for decode null (only mismatch fails)", async () => {
     (decodeNumericUserIdFromFrame0 as jest.Mock).mockReturnValue(null);
     const { result } = renderHook(() =>
       useFrameAnalysis(videoRef, true, "vid-1", 123, null)
@@ -90,7 +79,7 @@ describe("useFrameAnalysis", () => {
     await act(async () => {
       await new Promise((r) => setTimeout(r, 700));
     });
-    expect(result.current.verificationFailed).toBe(true);
+    expect(result.current.verificationFailed).toBe(false);
   });
 
   it("sets verificationFailed when decode does not match initialNumericUserId", async () => {
