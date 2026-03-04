@@ -57,6 +57,7 @@ export function VideoPlayer({videoUrl, videoId, onClose, isOpen, enableFrameAnal
   // When ongoing verification fails, mark as failed and pause
   useEffect(() => {
     if (verificationFailed && verificationStatus === "verified") {
+      console.warn("[VideoPlayer] Ongoing verification failed — pausing and showing not authentic");
       setVerificationStatus("failed");
       if (videoRef.current) {
         videoRef.current.pause();
@@ -83,38 +84,64 @@ export function VideoPlayer({videoUrl, videoId, onClose, isOpen, enableFrameAnal
     setPublicKeyPem(null);
     initialVerifyDoneRef.current = false;
 
+    console.log("[VideoPlayer] Initial verification started", { videoId, enableFrameAnalysis });
+
     try {
       const imageData = captureFrameToImageData(video);
       if (abortController.signal.aborted || !imageData) {
+        console.warn("[VideoPlayer] Initial verification failed: frame capture failed or aborted", {
+          hasImageData: !!imageData,
+          aborted: abortController.signal.aborted,
+        });
         setVerificationStatus("failed");
         return;
       }
+      console.log("[VideoPlayer] Frame 0 captured", { width: imageData.width, height: imageData.height });
 
       const numericUserId = decodeNumericUserIdFromFrame0(imageData);
       if (abortController.signal.aborted || numericUserId == null || numericUserId <= 0) {
+        console.warn("[VideoPlayer] Initial verification failed: decode failed or invalid", {
+          numericUserId: numericUserId ?? "null",
+          aborted: abortController.signal.aborted,
+        });
         setVerificationStatus("failed");
         return;
       }
+      console.log("[VideoPlayer] Frame 0 decoded", { numericUserId });
 
-      const res = await fetch(
-        `${SAIVD_API_ORIGIN}/api/users/${numericUserId}/public-key`,
-        { signal: abortController.signal, credentials: "omit" }
-      );
+      const publicKeyUrl = `${SAIVD_API_ORIGIN}/api/users/${numericUserId}/public-key`;
+      console.log("[VideoPlayer] Fetching public key", { url: publicKeyUrl });
+      const res = await fetch(publicKeyUrl, {
+        signal: abortController.signal,
+        credentials: "omit",
+      });
       if (abortController.signal.aborted) return;
 
       if (!res.ok) {
+        console.warn("[VideoPlayer] Initial verification failed: public key fetch not OK", {
+          status: res.status,
+          statusText: res.statusText,
+        });
         setVerificationStatus("failed");
         return;
       }
 
       const body = await res.json().catch(() => ({}));
       if (!body.success || !body.data?.public_key_pem) {
+        console.warn("[VideoPlayer] Initial verification failed: invalid public key response", {
+          success: body.success,
+          hasPem: !!(body.data?.public_key_pem),
+        });
         setVerificationStatus("failed");
         return;
       }
 
       const publicKeyPemValue = body.data.public_key_pem as string;
       const creatorUserId = body.data.creator_user_id as string | undefined;
+      console.log("[VideoPlayer] Public key received", {
+        hasCreatorUserId: !!creatorUserId,
+        pemLength: publicKeyPemValue?.length ?? 0,
+      });
 
       setInitialNumericUserId(numericUserId);
       setPublicKeyPem(publicKeyPemValue);
@@ -124,10 +151,12 @@ export function VideoPlayer({videoUrl, videoId, onClose, isOpen, enableFrameAnal
         const publicKey = await importPublicKeyFromPem(publicKeyPemValue);
         const {verified} = await decodeAndVerifyFrame(publicKey, imageData);
         if (!verified) {
-          // Per guide: decode success is primary; RSA failure can still allow verified state
+          console.log("[VideoPlayer] Frame 0 RSA verify failed (non-fatal, continuing as verified)");
+        } else {
+          console.log("[VideoPlayer] Frame 0 RSA verify passed");
         }
-      } catch {
-        // RSA verify optional; continue with verified state
+      } catch (rsaErr) {
+        console.log("[VideoPlayer] Frame 0 RSA verify error (non-fatal):", rsaErr);
       }
 
       if (abortController.signal.aborted) return;
@@ -135,9 +164,13 @@ export function VideoPlayer({videoUrl, videoId, onClose, isOpen, enableFrameAnal
       setVerifiedUserId(creatorUserId ?? String(numericUserId));
       setVerificationStatus("verified");
       initialVerifyDoneRef.current = true;
+      console.log("[VideoPlayer] Initial verification complete", {
+        verifiedUserId: creatorUserId ?? String(numericUserId),
+        numericUserId,
+      });
     } catch (err) {
       if (abortController.signal.aborted) return;
-      console.error("Error verifying video:", err);
+      console.error("[VideoPlayer] Initial verification error:", err);
       setVerificationStatus("failed");
     } finally {
       abortControllerRef.current = null;

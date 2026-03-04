@@ -135,7 +135,14 @@ export function mode(arr: number[]): number | null {
  */
 export function decodeNumericUserIdFromRightSide(rightSide: number[]): number | null {
   const repsUsed = Math.min(7, Math.floor(rightSide.length / 9));
-  if (repsUsed === 0) return null;
+  if (repsUsed === 0) {
+    console.warn("[watermark-decode] decodeNumericUserIdFromRightSide: not enough data", {
+      rightSideLength: rightSide.length,
+      repsUsed: 0,
+      needAtLeast: 9,
+    });
+    return null;
+  }
 
   const values = rightSide.slice(0, 9 * repsUsed);
   const digits: number[] = [];
@@ -144,6 +151,13 @@ export function decodeNumericUserIdFromRightSide(rightSide: number[]): number | 
     const group = values.slice(d * repsUsed, (d + 1) * repsUsed);
     const m = mode(group);
     if (m === null || m < 0 || m > 9) {
+      console.warn("[watermark-decode] decodeNumericUserIdFromRightSide: invalid digit", {
+        digitIndex: d,
+        modeValue: m,
+        groupLength: group.length,
+        rightSideLength: rightSide.length,
+        repsUsed,
+      });
       return null;
     }
     digits.push(m);

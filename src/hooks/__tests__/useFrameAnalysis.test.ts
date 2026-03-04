@@ -82,13 +82,13 @@ describe("useFrameAnalysis", () => {
     expect(result.current.verificationFailed).toBe(false);
   });
 
-  it("sets verificationFailed after two consecutive decode nulls", async () => {
+  it("sets verificationFailed after four consecutive decode nulls", async () => {
     (decodeNumericUserIdFromFrame0 as jest.Mock).mockReturnValue(null);
     const { result } = renderHook(() =>
       useFrameAnalysis(videoRef, true, "vid-1", 123, null)
     );
     await act(async () => {
-      await new Promise((r) => setTimeout(r, 250));
+      await new Promise((r) => setTimeout(r, 700));
     });
     expect(result.current.verificationFailed).toBe(true);
   });

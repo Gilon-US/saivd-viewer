@@ -40,7 +40,7 @@ export function useFrameAnalysis(
   /** Consecutive 10th-frames where decode returned null; fail only after this exceeds tolerance. */
   const consecutiveNullDecodesRef = useRef(0);
 
-  const MAX_CONSECUTIVE_NULL_DECODES = 2;
+  const MAX_CONSECUTIVE_NULL_DECODES = 4;
 
   useEffect(() => {
     const analyzeFrame = () => {
@@ -87,8 +87,9 @@ export function useFrameAnalysis(
       }
 
       const decoded = decodeNumericUserIdFromFrame0(imageData);
-      if (currentFrame <= 20) {
-        console.log("[useFrameAnalysis] Frame", currentFrame, "decoded:", decoded, "expected:", initialNumericUserId);
+      const decodeOk = decoded === initialNumericUserId;
+      if (currentFrame <= 20 || currentFrame % 50 === 0) {
+        console.log("[useFrameAnalysis] Frame", currentFrame, "decoded:", decoded, "expected:", initialNumericUserId, decodeOk ? "OK" : "mismatch/null");
       }
 
       if (decoded === null) {
@@ -154,6 +155,12 @@ export function useFrameAnalysis(
 
     if (isPlaying && videoId && initialNumericUserId != null && initialNumericUserId > 0) {
       frameCountRef.current = 0;
+      consecutiveNullDecodesRef.current = 0;
+      console.log("[useFrameAnalysis] Verification loop started", {
+        videoId,
+        initialNumericUserId,
+        hasPublicKeyPem: !!publicKeyPem,
+      });
       animationFrameRef.current = requestAnimationFrame(analyzeFrame);
     }
 
