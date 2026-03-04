@@ -72,6 +72,7 @@ export function useFrameAnalysis(
 
       const imageData = captureFrameToImageData(video);
       if (!imageData) {
+        console.warn("[useFrameAnalysis] Frame capture failed at frame", currentFrame);
         setVerificationFailed(true);
         isVerifyingRef.current = false;
         frameCountRef.current = currentFrame + 1;
@@ -82,7 +83,15 @@ export function useFrameAnalysis(
       }
 
       const decoded = decodeNumericUserIdFromFrame0(imageData);
+      if (currentFrame <= 20) {
+        console.log("[useFrameAnalysis] Frame", currentFrame, "decoded:", decoded, "expected:", initialNumericUserId);
+      }
       if (decoded !== initialNumericUserId) {
+        console.warn("[useFrameAnalysis] Decode mismatch:", {
+          frame: currentFrame,
+          decoded,
+          expected: initialNumericUserId,
+        });
         setVerificationFailed(true);
         isVerifyingRef.current = false;
         frameCountRef.current = currentFrame + 1;
@@ -92,17 +101,17 @@ export function useFrameAnalysis(
         return;
       }
 
-      // Optional RSA verify for this frame
+      // Optional RSA verify for this frame (non-fatal per guide: decode match is primary)
       if (publicKeyPem) {
         importPublicKeyFromPem(publicKeyPem)
           .then((key) => decodeAndVerifyFrame(key, imageData))
           .then(({verified}) => {
             if (!verified) {
-              setVerificationFailed(true);
+              console.warn("[useFrameAnalysis] RSA verify failed for frame", currentFrame, "(non-fatal)");
             }
           })
-          .catch(() => {
-            // RSA failure can be treated as non-fatal per guide
+          .catch((err) => {
+            console.warn("[useFrameAnalysis] RSA verify error for frame", currentFrame, "(non-fatal):", err);
           })
           .finally(() => {
             isVerifyingRef.current = false;
