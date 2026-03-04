@@ -37,6 +37,10 @@ export function useFrameAnalysis(
   const frameCountRef = useRef(0);
   const lastVerifyFrameRef = useRef(-1);
   const isVerifyingRef = useRef(false);
+  /** Consecutive 10th-frames where decode returned null; fail only after this exceeds tolerance. */
+  const consecutiveNullDecodesRef = useRef(0);
+
+  const MAX_CONSECUTIVE_NULL_DECODES = 2;
 
   useEffect(() => {
     const analyzeFrame = () => {
@@ -86,6 +90,25 @@ export function useFrameAnalysis(
       if (currentFrame <= 20) {
         console.log("[useFrameAnalysis] Frame", currentFrame, "decoded:", decoded, "expected:", initialNumericUserId);
       }
+
+      if (decoded === null) {
+        consecutiveNullDecodesRef.current += 1;
+        if (consecutiveNullDecodesRef.current >= MAX_CONSECUTIVE_NULL_DECODES) {
+          console.warn("[useFrameAnalysis] Too many consecutive decode failures (null) at frame", currentFrame);
+          setVerificationFailed(true);
+        } else {
+          console.log("[useFrameAnalysis] Decode null at frame", currentFrame, "(tolerant, need", MAX_CONSECUTIVE_NULL_DECODES - consecutiveNullDecodesRef.current, "more consecutive to fail)");
+        }
+        isVerifyingRef.current = false;
+        frameCountRef.current = currentFrame + 1;
+        if (isPlaying) {
+          animationFrameRef.current = requestAnimationFrame(analyzeFrame);
+        }
+        return;
+      }
+
+      consecutiveNullDecodesRef.current = 0;
+
       if (decoded !== initialNumericUserId) {
         console.warn("[useFrameAnalysis] Decode mismatch:", {
           frame: currentFrame,
@@ -148,6 +171,7 @@ export function useFrameAnalysis(
       setVerificationFailed(false);
       frameCountRef.current = 0;
       lastVerifyFrameRef.current = -1;
+      consecutiveNullDecodesRef.current = 0;
     }
   }, [videoId, initialNumericUserId]);
 
@@ -156,6 +180,7 @@ export function useFrameAnalysis(
       frameCountRef.current = 0;
       lastVerifyFrameRef.current = -1;
       isVerifyingRef.current = false;
+      consecutiveNullDecodesRef.current = 0;
     }
   }, [isPlaying]);
 
