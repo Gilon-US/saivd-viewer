@@ -2,22 +2,19 @@ import { renderHook, act } from "@testing-library/react";
 import { useFrameAnalysis } from "../useFrameAnalysis";
 import { RefObject } from "react";
 
+const mockDecodeAndVerifyFrame = jest.fn();
+const mockImportPublicKeyFromPem = jest.fn();
+
 jest.mock("@/lib/watermark-decode", () => ({
   captureFrameToImageData: jest.fn(),
-  decodeNumericUserIdFromFrame0: jest.fn(),
-  importPublicKeyFromPem: jest.fn(),
-  decodeAndVerifyFrame: jest.fn(),
+  importPublicKeyFromPem: (pem: string) => mockImportPublicKeyFromPem(pem),
+  decodeAndVerifyFrame: (...args: unknown[]) => mockDecodeAndVerifyFrame(...args),
 }));
-
-const { captureFrameToImageData, decodeNumericUserIdFromFrame0 } =
-  require("@/lib/watermark-decode") as {
-    captureFrameToImageData: jest.Mock;
-    decodeNumericUserIdFromFrame0: jest.Mock;
-  };
 
 describe("useFrameAnalysis", () => {
   let mockVideo: Partial<HTMLVideoElement>;
   let videoRef: RefObject<HTMLVideoElement>;
+  const PEM = "-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkq\n-----END PUBLIC KEY-----";
 
   beforeEach(() => {
     mockVideo = {
@@ -35,12 +32,17 @@ describe("useFrameAnalysis", () => {
     });
     global.cancelAnimationFrame = jest.fn();
 
-    (captureFrameToImageData as jest.Mock).mockReturnValue({
+    const { captureFrameToImageData } = require("@/lib/watermark-decode") as {
+      captureFrameToImageData: jest.Mock;
+    };
+    captureFrameToImageData.mockReturnValue({
       data: new Uint8ClampedArray(320 * 240 * 4),
       width: 320,
       height: 240,
     });
-    (decodeNumericUserIdFromFrame0 as jest.Mock).mockReturnValue(123);
+
+    mockImportPublicKeyFromPem.mockResolvedValue({} as CryptoKey);
+    mockDecodeAndVerifyFrame.mockResolvedValue({ verified: true });
   });
 
   it("returns verificationFailed false initially", () => {
@@ -52,44 +54,44 @@ describe("useFrameAnalysis", () => {
 
   it("does not start loop when not playing", () => {
     renderHook(() =>
-      useFrameAnalysis(videoRef, false, "vid-1", 123, null)
+      useFrameAnalysis(videoRef, false, "vid-1", 123, PEM)
     );
     expect(global.requestAnimationFrame).not.toHaveBeenCalled();
   });
 
-  it("does not start loop when initialNumericUserId is null", () => {
-    renderHook(() =>
-      useFrameAnalysis(videoRef, true, "vid-1", null, null)
-    );
-    expect(global.requestAnimationFrame).not.toHaveBeenCalled();
-  });
-
-  it("starts loop when playing with videoId and initialNumericUserId", () => {
+  it("does not start loop when publicKeyPem is null", () => {
     renderHook(() =>
       useFrameAnalysis(videoRef, true, "vid-1", 123, null)
+    );
+    expect(global.requestAnimationFrame).not.toHaveBeenCalled();
+  });
+
+  it("starts loop when playing with videoId and publicKeyPem", () => {
+    renderHook(() =>
+      useFrameAnalysis(videoRef, true, "vid-1", 123, PEM)
     );
     expect(global.requestAnimationFrame).toHaveBeenCalled();
   });
 
-  it("never sets verificationFailed for decode null (only mismatch fails)", async () => {
-    (decodeNumericUserIdFromFrame0 as jest.Mock).mockReturnValue(null);
+  it("sets verificationFailed when signature verify returns false", async () => {
+    mockDecodeAndVerifyFrame.mockResolvedValue({ verified: false });
     const { result } = renderHook(() =>
-      useFrameAnalysis(videoRef, true, "vid-1", 123, null)
+      useFrameAnalysis(videoRef, true, "vid-1", 123, PEM)
     );
     await act(async () => {
-      await new Promise((r) => setTimeout(r, 700));
-    });
-    expect(result.current.verificationFailed).toBe(false);
-  });
-
-  it("sets verificationFailed when decode does not match initialNumericUserId", async () => {
-    (decodeNumericUserIdFromFrame0 as jest.Mock).mockReturnValue(456);
-    const { result } = renderHook(() =>
-      useFrameAnalysis(videoRef, true, "vid-1", 123, null)
-    );
-    await act(async () => {
-      await new Promise((r) => setTimeout(r, 50));
+      await new Promise((r) => setTimeout(r, 80));
     });
     expect(result.current.verificationFailed).toBe(true);
+  });
+
+  it("keeps verificationFailed false when signature verify returns true", async () => {
+    mockDecodeAndVerifyFrame.mockResolvedValue({ verified: true });
+    const { result } = renderHook(() =>
+      useFrameAnalysis(videoRef, true, "vid-1", 123, PEM)
+    );
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 80));
+    });
+    expect(result.current.verificationFailed).toBe(false);
   });
 });

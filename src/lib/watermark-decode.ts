@@ -1,7 +1,7 @@
 /**
  * Client-side watermark decode and RSA verification.
- * Matches the algorithms in docs/FRONTEND_WATERMARK_VERIFICATION_IMPLEMENTATION_GUIDE.md.
- * User ID decode (9-digit encoding) follows docs/FRONTEND_USER_ID_DECODE_UPDATE.md.
+ * Matches docs/THIRD_PARTY_NEXTJS_APP_IMPLEMENTATION_GUIDE.md (§5) and
+ * docs/FRONTEND_WATERMARK_VERIFICATION_IMPLEMENTATION_GUIDE.md.
  */
 
 export const PATCH_SIZE = 16;
@@ -77,8 +77,7 @@ export function buildPatchMatrix(
           sum += luma[(py * PATCH_SIZE + dy) * width + (px * PATCH_SIZE + dx)];
         }
       }
-      const mean = sum / (PATCH_SIZE * PATCH_SIZE);
-      row.push((mean + 0.5) | 0);
+      row.push((sum + 128) >> 8);
     }
     matrix.push(row);
   }
@@ -240,7 +239,7 @@ export function buildMessageBytes(rightSide: number[]): Uint8Array {
   const len = Math.min(MAX_MESSAGE_LENGTH, rightSide.length);
   const chars: string[] = [];
   for (let i = 0; i < len; i++) {
-    chars.push(String.fromCodePoint(rightSide[i]));
+    chars.push(String.fromCharCode(rightSide[i]));
   }
   const str = chars.join("");
   return new TextEncoder().encode(str);

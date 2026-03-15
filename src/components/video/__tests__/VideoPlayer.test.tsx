@@ -1,4 +1,4 @@
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, act } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import { VideoPlayer } from '../VideoPlayer';
 
@@ -16,6 +16,18 @@ jest.mock('lucide-react', () => ({
 // Mock useFrameAnalysis hook (ongoing verification every 10th frame)
 jest.mock('@/hooks/useFrameAnalysis', () => ({
   useFrameAnalysis: jest.fn(() => ({ verificationFailed: false })),
+}));
+
+// Mock watermark-decode so we can control frame 0 RSA verify result
+jest.mock('@/lib/watermark-decode', () => ({
+  captureFrameToImageData: jest.fn(() => ({
+    data: new Uint8ClampedArray(320 * 240 * 4),
+    width: 320,
+    height: 240,
+  })),
+  decodeNumericUserIdFromFrame0: jest.fn(() => 123),
+  importPublicKeyFromPem: jest.fn(() => Promise.resolve({})),
+  decodeAndVerifyFrame: jest.fn().mockResolvedValue({ verified: true }),
 }));
 
 describe('VideoPlayer', () => {
@@ -98,5 +110,38 @@ describe('VideoPlayer', () => {
   it('has proper accessibility attributes', () => {
     render(<VideoPlayer {...defaultProps} />);
     expect(screen.getByLabelText('Close video player')).toBeInTheDocument();
+  });
+
+  it('shows not authentic when frame 0 RSA verify fails', async () => {
+    const watermarkDecode = require('@/lib/watermark-decode');
+    watermarkDecode.decodeAndVerifyFrame.mockResolvedValueOnce({ verified: false });
+
+    const origFetch = global.fetch;
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ success: true, data: { public_key_pem: 'pem' } }),
+    }) as jest.Mock;
+
+    render(
+      <VideoPlayer
+        {...defaultProps}
+        videoId="vid-1"
+        enableFrameAnalysis
+      />
+    );
+
+    const video = document.querySelector('video');
+    if (video) {
+      Object.defineProperty(video, 'readyState', { value: 2, configurable: true });
+      Object.defineProperty(video, 'currentTime', { value: 0, configurable: true, writable: false });
+      fireEvent.seeked(video);
+    }
+
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 150));
+    });
+
+    expect(screen.getByText(/This video is not authentic|viewing not allowed/i)).toBeInTheDocument();
+    global.fetch = origFetch;
   });
 });

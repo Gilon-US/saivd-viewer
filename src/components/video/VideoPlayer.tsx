@@ -32,7 +32,6 @@ export function VideoPlayer({videoUrl, videoId, onClose, isOpen, enableFrameAnal
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [verificationStatus, setVerificationStatus] = useState<VerificationStatus>("idle");
-  const [verifiedUserId, setVerifiedUserId] = useState<string | null>(null);
   const [initialNumericUserId, setInitialNumericUserId] = useState<number | null>(null);
   const [publicKeyPem, setPublicKeyPem] = useState<string | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -50,8 +49,8 @@ export function VideoPlayer({videoUrl, videoId, onClose, isOpen, enableFrameAnal
   );
 
   const qrUrl =
-    verifiedUserId != null
-      ? `${SAIVD_API_ORIGIN}/profile/${verifiedUserId}/qr`
+    initialNumericUserId != null
+      ? `${SAIVD_API_ORIGIN}/profile/${initialNumericUserId}/qr`
       : null;
 
   // When ongoing verification fails, mark as failed and pause
@@ -79,7 +78,6 @@ export function VideoPlayer({videoUrl, videoId, onClose, isOpen, enableFrameAnal
     abortControllerRef.current = abortController;
 
     setVerificationStatus("verifying");
-    setVerifiedUserId(null);
     setInitialNumericUserId(null);
     setPublicKeyPem(null);
     initialVerifyDoneRef.current = false;
@@ -137,37 +135,35 @@ export function VideoPlayer({videoUrl, videoId, onClose, isOpen, enableFrameAnal
       }
 
       const publicKeyPemValue = body.data.public_key_pem as string;
-      const creatorUserId = body.data.creator_user_id as string | undefined;
       console.log("[VideoPlayer] Public key received", {
-        hasCreatorUserId: !!creatorUserId,
         pemLength: publicKeyPemValue?.length ?? 0,
       });
 
       setInitialNumericUserId(numericUserId);
       setPublicKeyPem(publicKeyPemValue);
 
-      // Optional RSA verify for frame 0
+      // Required RSA verify for frame 0 (per Third-Party Guide)
+      let verified = false;
       try {
         const publicKey = await importPublicKeyFromPem(publicKeyPemValue);
-        const {verified} = await decodeAndVerifyFrame(publicKey, imageData);
-        if (!verified) {
-          console.log("[VideoPlayer] Frame 0 RSA verify failed (non-fatal, continuing as verified)");
-        } else {
-          console.log("[VideoPlayer] Frame 0 RSA verify passed");
-        }
+        const result = await decodeAndVerifyFrame(publicKey, imageData);
+        verified = result.verified;
       } catch (rsaErr) {
-        console.log("[VideoPlayer] Frame 0 RSA verify error (non-fatal):", rsaErr);
+        console.warn("[VideoPlayer] Frame 0 RSA verify error:", rsaErr);
       }
 
       if (abortController.signal.aborted) return;
 
-      setVerifiedUserId(creatorUserId ?? String(numericUserId));
+      if (!verified) {
+        console.warn("[VideoPlayer] Initial verification failed: frame 0 RSA verify returned false");
+        setVerificationStatus("failed");
+        return;
+      }
+
+      console.log("[VideoPlayer] Frame 0 RSA verify passed");
       setVerificationStatus("verified");
       initialVerifyDoneRef.current = true;
-      console.log("[VideoPlayer] Initial verification complete", {
-        verifiedUserId: creatorUserId ?? String(numericUserId),
-        numericUserId,
-      });
+      console.log("[VideoPlayer] Initial verification complete", { numericUserId });
     } catch (err) {
       if (abortController.signal.aborted) return;
       console.error("[VideoPlayer] Initial verification error:", err);
@@ -182,7 +178,6 @@ export function VideoPlayer({videoUrl, videoId, onClose, isOpen, enableFrameAnal
   useEffect(() => {
     if (!isOpen) {
       setVerificationStatus("idle");
-      setVerifiedUserId(null);
       setInitialNumericUserId(null);
       setPublicKeyPem(null);
       initialVerifyDoneRef.current = false;

@@ -166,9 +166,9 @@ Thumbnail generation is client-side in `utils/videoThumbnail.ts` (canvas + video
 
 1. **Grid**: User clicks thumbnail → `GET /api/videos/[id]/play?variant=watermarked` → receives presigned URL.
 2. **Player**: `VideoPlayer` opens with that URL. Video has `crossOrigin="anonymous"` for canvas access.
-3. **Verification**: On open, video loads; when `loadeddata` and `seeked` (at `currentTime = 0`), frame 0 is captured and decoded in-browser via `watermark-decode.ts` (luma, patch matrix, right-side row sums). Decoded `numeric_user_id` is used to fetch the public key from the **external** SAIVD API: `GET {NEXT_PUBLIC_SAIVD_API_URL}/api/users/{numericUserId}/public-key` (default origin `https://saivd.netlify.app`). If decode or fetch fails → "This video is not authentic". Optional RSA verify with the returned PEM; decode success is primary. After the key is returned, verification (frame 0 and every 10th frame) is done locally; no further calls to the external API for that playback.
-4. **Ongoing verification**: During playback, `useFrameAnalysis` runs every 10th frame (0, 10, 20, …): decode and compare with initial `numeric_user_id`; if mismatch or decode fails → set `verificationFailed`, VideoPlayer pauses and shows "not authentic".
-5. **QR URL**: From public-key response `creator_user_id` (UUID) or numeric id: `{NEXT_PUBLIC_SAIVD_API_URL}/profile/{user_id}/qr`.
+3. **Verification**: On open, video loads; when `loadeddata` and `seeked` (at `currentTime = 0`), frame 0 is captured and decoded in-browser via `watermark-decode.ts` (luma, patch matrix, right-side row sums). Decoded `numeric_user_id` is used to fetch the public key from the **external** SAIVD API: `GET {NEXT_PUBLIC_SAIVD_API_URL}/api/users/{numericUserId}/public-key` (default origin `https://saivd.netlify.app`). If decode or fetch fails → "This video is not authentic". **RSA signature verification** for frame 0 is **required**; if verify returns false, playback is blocked. After the key is returned, verification (frame 0 and every 10th frame) is done locally; no further calls to the external API for that playback. *(The Third-Party Guide recommends verifying before setting `video.src` via Range + WebCodecs; this app currently verifies after load and blocks play until frame 0 verification succeeds.)*
+4. **Ongoing verification**: During playback, `useFrameAnalysis` runs every 10th frame (10, 20, 30, …): capture frame, build right_side and left_side, run **signature verification** with the already-fetched public key; if verify returns false → set `verificationFailed`, VideoPlayer pauses and shows "not authentic".
+5. **QR URL**: Uses the **numeric** user ID decoded from frame 0: `{NEXT_PUBLIC_SAIVD_API_URL}/profile/{numericUserId}/qr`.
 6. **Overlay**: QR code + logo flip animation (see `docs/qr-logo-flip-animation-implementation-guide.md`). Shown only when `verificationStatus === "verified"` and `qrUrl` is set.
 
 **Public keys**: This app does not expose or store public keys. It calls the external SAIVD API (saivd.netlify.app, or `NEXT_PUBLIC_SAIVD_API_URL`) once per playback to get the public key for the decoded `numeric_user_id`; that key is then used only in the browser for verification. See `docs/FRONTEND_WATERMARK_VERIFICATION_IMPLEMENTATION_GUIDE.md`.
@@ -214,6 +214,7 @@ Thumbnail generation is client-side in `utils/videoThumbnail.ts` (canvas + video
 
 | Document | Purpose |
 |----------|---------|
+| `docs/THIRD_PARTY_NEXTJS_APP_IMPLEMENTATION_GUIDE.md` | Third-party playback/verification flow, block play until verify, QR URL, constants (§5) |
 | `docs/FRONTEND_WATERMARK_VERIFICATION_IMPLEMENTATION_GUIDE.md` | Client-side decode, public-key API, RSA verify, every-10th-frame verification |
 | `docs/video-player-implementation-guide.md` | Frame analysis, verification, QR logic (may reference legacy extract-user-id) |
 | `docs/qr-logo-flip-animation-implementation-guide.md` | QR/logo overlay CSS and React structure |

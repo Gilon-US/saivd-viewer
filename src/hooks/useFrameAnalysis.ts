@@ -3,7 +3,6 @@
 import {useEffect, useState, useRef, RefObject} from "react";
 import {
   captureFrameToImageData,
-  decodeNumericUserIdFromFrame0,
   importPublicKeyFromPem,
   decodeAndVerifyFrame,
 } from "@/lib/watermark-decode";
@@ -13,34 +12,51 @@ const VERIFY_INTERVAL = 10; // Every 10th frame (0, 10, 20, 30, …)
 /**
  * Custom hook for ongoing watermark verification during playback.
  *
- * - Runs only when video is playing and initial verification has passed (videoId + initialNumericUserId set).
- * - Every 10th frame: captures frame, decodes numeric_user_id, compares with initial; optionally RSA-verifies.
- * - Sets verificationFailed if decode fails or numeric_user_id does not match.
+ * Per Third-Party Guide §6: for frames 10, 20, 30, … only run signature
+ * verification with the already-fetched key (no user ID decode). If
+ * RSA verify returns false, sets verificationFailed.
  *
  * @param videoRef - Reference to the video element
  * @param isPlaying - Whether the video is currently playing
- * @param videoId - Optional; when set with initialNumericUserId, enables ongoing verification
- * @param initialNumericUserId - Decoded numeric user ID from frame 0 (from VideoPlayer)
- * @param publicKeyPem - Optional PEM for RSA verification of each 10th frame
- * @returns Object containing verificationFailed (true if any 10th-frame check failed)
+ * @param videoId - Optional; when set with publicKeyPem, enables ongoing verification
+ * @param initialNumericUserId - Unused; kept for API compatibility
+ * @param publicKeyPem - PEM for RSA verification of each 10th frame (required for verification)
+ * @returns Object containing verificationFailed (true if any 10th-frame signature verify failed)
  */
 export function useFrameAnalysis(
   videoRef: RefObject<HTMLVideoElement | null>,
   isPlaying: boolean,
   videoId?: string,
-  initialNumericUserId?: number | null,
+  _initialNumericUserId?: number | null,
   publicKeyPem?: string | null
 ): {verificationFailed: boolean} {
   const [verificationFailed, setVerificationFailed] = useState(false);
+  const publicKeyRef = useRef<CryptoKey | null>(null);
 
   const animationFrameRef = useRef<number | null>(null);
   const frameCountRef = useRef(0);
   const lastVerifyFrameRef = useRef(-1);
   const isVerifyingRef = useRef(false);
+
+  useEffect(() => {
+    if (!publicKeyPem) {
+      publicKeyRef.current = null;
+      return;
+    }
+    let cancelled = false;
+    importPublicKeyFromPem(publicKeyPem).then((key) => {
+      if (!cancelled) publicKeyRef.current = key;
+    });
+    return () => {
+      cancelled = true;
+      publicKeyRef.current = null;
+    };
+  }, [publicKeyPem]);
+
   useEffect(() => {
     const analyzeFrame = () => {
       const video = videoRef.current;
-      if (!video || !videoId || initialNumericUserId == null || initialNumericUserId <= 0) {
+      if (!video || !videoId || !publicKeyPem) {
         return;
       }
       if (video.paused || video.ended || !isPlaying) {
@@ -49,7 +65,6 @@ export function useFrameAnalysis(
 
       const currentFrame = frameCountRef.current;
 
-      // Verify every 10th frame (0, 10, 20, 30, …)
       const isTenthFrame = currentFrame % VERIFY_INTERVAL === 0;
       if (!isTenthFrame || isVerifyingRef.current) {
         frameCountRef.current = currentFrame + 1;
@@ -81,50 +96,22 @@ export function useFrameAnalysis(
         return;
       }
 
-      const decoded = decodeNumericUserIdFromFrame0(imageData);
-      const decodeOk = decoded === initialNumericUserId;
-      if (currentFrame <= 20 || currentFrame % 50 === 0) {
-        console.log("[useFrameAnalysis] Frame", currentFrame, "decoded:", decoded, "expected:", initialNumericUserId, decodeOk ? "OK" : "mismatch/null");
-      }
-
-      if (decoded === null) {
-        if (currentFrame <= 60 || currentFrame % 50 === 0) {
-          console.log("[useFrameAnalysis] Decode null at frame", currentFrame, "(skipped, only mismatch fails)");
-        }
-        isVerifyingRef.current = false;
-        frameCountRef.current = currentFrame + 1;
-        if (isPlaying) {
-          animationFrameRef.current = requestAnimationFrame(analyzeFrame);
-        }
-        return;
-      }
-
-      if (decoded !== initialNumericUserId) {
-        console.warn("[useFrameAnalysis] Decode mismatch:", {
-          frame: currentFrame,
-          decoded,
-          expected: initialNumericUserId,
-        });
-        setVerificationFailed(true);
-        isVerifyingRef.current = false;
-        frameCountRef.current = currentFrame + 1;
-        if (isPlaying) {
-          animationFrameRef.current = requestAnimationFrame(analyzeFrame);
-        }
-        return;
-      }
-
-      // Optional RSA verify for this frame (non-fatal per guide: decode match is primary)
-      if (publicKeyPem) {
+      const key = publicKeyRef.current;
+      if (!key) {
         importPublicKeyFromPem(publicKeyPem)
-          .then((key) => decodeAndVerifyFrame(key, imageData))
+          .then((k) => {
+            publicKeyRef.current = k;
+            return decodeAndVerifyFrame(k, imageData);
+          })
           .then(({verified}) => {
             if (!verified) {
-              console.warn("[useFrameAnalysis] RSA verify failed for frame", currentFrame, "(non-fatal)");
+              console.warn("[useFrameAnalysis] Signature verify failed for frame", currentFrame);
+              setVerificationFailed(true);
             }
           })
           .catch((err) => {
-            console.warn("[useFrameAnalysis] RSA verify error for frame", currentFrame, "(non-fatal):", err);
+            console.warn("[useFrameAnalysis] Verify error for frame", currentFrame, err);
+            setVerificationFailed(true);
           })
           .finally(() => {
             isVerifyingRef.current = false;
@@ -133,22 +120,31 @@ export function useFrameAnalysis(
               animationFrameRef.current = requestAnimationFrame(analyzeFrame);
             }
           });
-      } else {
-        isVerifyingRef.current = false;
-        frameCountRef.current = currentFrame + 1;
-        if (isPlaying) {
-          animationFrameRef.current = requestAnimationFrame(analyzeFrame);
-        }
+        return;
       }
+
+      decodeAndVerifyFrame(key, imageData)
+        .then(({verified}) => {
+          if (!verified) {
+            console.warn("[useFrameAnalysis] Signature verify failed for frame", currentFrame);
+            setVerificationFailed(true);
+          }
+        })
+        .catch((err) => {
+          console.warn("[useFrameAnalysis] Verify error for frame", currentFrame, err);
+          setVerificationFailed(true);
+        })
+        .finally(() => {
+          isVerifyingRef.current = false;
+          frameCountRef.current = currentFrame + 1;
+          if (isPlaying) {
+            animationFrameRef.current = requestAnimationFrame(analyzeFrame);
+          }
+        });
     };
 
-    if (isPlaying && videoId && initialNumericUserId != null && initialNumericUserId > 0) {
+    if (isPlaying && videoId && publicKeyPem) {
       frameCountRef.current = 0;
-      console.log("[useFrameAnalysis] Verification loop started", {
-        videoId,
-        initialNumericUserId,
-        hasPublicKeyPem: !!publicKeyPem,
-      });
       animationFrameRef.current = requestAnimationFrame(analyzeFrame);
     }
 
@@ -158,16 +154,15 @@ export function useFrameAnalysis(
         animationFrameRef.current = null;
       }
     };
-  }, [videoRef, isPlaying, videoId, initialNumericUserId, publicKeyPem]);
+  }, [videoRef, isPlaying, videoId, publicKeyPem]);
 
-  // Reset verificationFailed and frame count when dependencies change
   useEffect(() => {
-    if (!videoId || initialNumericUserId == null) {
+    if (!videoId || !publicKeyPem) {
       setVerificationFailed(false);
       frameCountRef.current = 0;
       lastVerifyFrameRef.current = -1;
     }
-  }, [videoId, initialNumericUserId]);
+  }, [videoId, publicKeyPem]);
 
   useEffect(() => {
     if (!isPlaying) {
