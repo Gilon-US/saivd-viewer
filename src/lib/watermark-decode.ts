@@ -111,19 +111,17 @@ export function getRightSideRowSums(
   return rightSide;
 }
 
+/** Mode (most frequent value); on tie, use smallest value (per Third-Party Guide §5.5). */
 export function mode(arr: number[]): number | null {
   if (arr.length === 0) return null;
   const counts = new Map<number, number>();
   for (const v of arr) counts.set(v, (counts.get(v) ?? 0) + 1);
-  let best: number | null = null;
   let maxCount = 0;
-  for (const [v, c] of counts) {
-    if (c > maxCount) {
-      maxCount = c;
-      best = v;
-    }
+  for (const c of counts.values()) {
+    if (c > maxCount) maxCount = c;
   }
-  return best;
+  const tied = [...counts.entries()].filter(([, c]) => c === maxCount).map(([v]) => v);
+  return tied.length > 0 ? Math.min(...tied) : null;
 }
 
 /**
