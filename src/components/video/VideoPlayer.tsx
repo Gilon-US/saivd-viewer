@@ -85,6 +85,12 @@ export function VideoPlayer({videoUrl, videoId, onClose, isOpen, enableFrameAnal
     console.log("[VideoPlayer] Initial verification started", { videoId, enableFrameAnalysis });
 
     try {
+      console.log("[verify-diagnostic] Frame 0 capture", {
+        videoWidth: video.videoWidth,
+        videoHeight: video.videoHeight,
+        readyState: video.readyState,
+        currentTime: video.currentTime,
+      });
       const imageData = captureFrameToImageData(video);
       if (abortController.signal.aborted || !imageData) {
         console.warn("[VideoPlayer] Initial verification failed: frame capture failed or aborted", {
@@ -94,18 +100,23 @@ export function VideoPlayer({videoUrl, videoId, onClose, isOpen, enableFrameAnal
         setVerificationStatus("failed");
         return;
       }
-      console.log("[VideoPlayer] Frame 0 captured", { width: imageData.width, height: imageData.height });
+      console.log("[verify-diagnostic] Frame 0 imageData", {
+        width: imageData.width,
+        height: imageData.height,
+        dataLength: imageData.data.length,
+      });
 
       const numericUserId = decodeNumericUserIdFromFrame0(imageData);
       if (abortController.signal.aborted || numericUserId == null || numericUserId <= 0) {
-        console.warn("[VideoPlayer] Initial verification failed: decode failed or invalid", {
+        console.warn("[verify-diagnostic] Frame 0 decode failed", {
           numericUserId: numericUserId ?? "null",
           aborted: abortController.signal.aborted,
+          hint: "Check [watermark-diagnostic] logs for rightSide/rightEndIndex; encoder may use different crop or patch formula.",
         });
         setVerificationStatus("failed");
         return;
       }
-      console.log("[VideoPlayer] Frame 0 decoded", { numericUserId });
+      console.log("[verify-diagnostic] Frame 0 decoded numeric_user_id", { numericUserId });
 
       const publicKeyUrl = `${SAIVD_API_ORIGIN}/api/users/${numericUserId}/public-key`;
       console.log("[VideoPlayer] Fetching public key", { url: publicKeyUrl });
@@ -116,9 +127,11 @@ export function VideoPlayer({videoUrl, videoId, onClose, isOpen, enableFrameAnal
       if (abortController.signal.aborted) return;
 
       if (!res.ok) {
-        console.warn("[VideoPlayer] Initial verification failed: public key fetch not OK", {
+        console.warn("[verify-diagnostic] Public key fetch failed", {
+          numericUserId,
           status: res.status,
           statusText: res.statusText,
+          hint: "404 = user/key not found for this ID; check decoded numeric_user_id matches encoder.",
         });
         setVerificationStatus("failed");
         return;
@@ -126,9 +139,11 @@ export function VideoPlayer({videoUrl, videoId, onClose, isOpen, enableFrameAnal
 
       const body = await res.json().catch(() => ({}));
       if (!body.success || !body.data?.public_key_pem) {
-        console.warn("[VideoPlayer] Initial verification failed: invalid public key response", {
+        console.warn("[verify-diagnostic] Invalid public key response", {
+          numericUserId,
           success: body.success,
           hasPem: !!(body.data?.public_key_pem),
+          bodyKeys: body?.data ? Object.keys(body.data) : [],
         });
         setVerificationStatus("failed");
         return;
@@ -148,14 +163,22 @@ export function VideoPlayer({videoUrl, videoId, onClose, isOpen, enableFrameAnal
         const publicKey = await importPublicKeyFromPem(publicKeyPemValue);
         const result = await decodeAndVerifyFrame(publicKey, imageData);
         verified = result.verified;
+        console.log("[verify-diagnostic] Frame 0 RSA result", {
+          verified: result.verified,
+          numericUserIdFromVerify: result.numericUserId,
+          hint: !result.verified && "Check [watermark-diagnostic] verifyFrame for rightSide/signature vs encoder.",
+        });
       } catch (rsaErr) {
-        console.warn("[VideoPlayer] Frame 0 RSA verify error:", rsaErr);
+        console.warn("[verify-diagnostic] Frame 0 RSA verify error", rsaErr);
       }
 
       if (abortController.signal.aborted) return;
 
       if (!verified) {
-        console.warn("[VideoPlayer] Initial verification failed: frame 0 RSA verify returned false");
+        console.warn("[verify-diagnostic] Verification failed: frame 0 RSA verify returned false", {
+          decodedNumericUserId: numericUserId,
+          hint: "Valid videos showing invalid: compare [watermark-diagnostic] rightSideFirst63 and verifyFrame rightSideFirst20 with encoder output; check patch rounding (sum+128)>>8 and BT.709 luma.",
+        });
         setVerificationStatus("failed");
         return;
       }

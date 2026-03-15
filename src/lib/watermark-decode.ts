@@ -164,20 +164,54 @@ export function decodeNumericUserIdFromRightSide(rightSide: number[]): number | 
 
   const digitStr = digits.join("");
   const numericUserId = parseInt(digitStr, 10);
-  return Number.isNaN(numericUserId) ? null : numericUserId;
+  const result = Number.isNaN(numericUserId) ? null : numericUserId;
+  console.log("[watermark-diagnostic] decodeNumericUserIdFromRightSide", {
+    repsUsed,
+    digitStr,
+    numericUserId: result,
+    digits,
+  });
+  return result;
 }
 
 export function decodeNumericUserIdFromFrame0(imageData: ImageData): number | null {
   const {luma, width, height} = cropToMultipleOf16(imageData);
-  if (width === 0 || height === 0) return null;
+  if (width === 0 || height === 0) {
+    console.warn("[watermark-diagnostic] decodeNumericUserIdFromFrame0: zero crop", {
+      originalWidth: imageData.width,
+      originalHeight: imageData.height,
+    });
+    return null;
+  }
 
   const givenFrame = buildPatchMatrix(luma, width, height);
+  const patchRows = givenFrame.length;
   const patchCols = givenFrame[0]?.length ?? 0;
   const rightEndIndex = getRightEndIndex(height, patchCols);
-  if (rightEndIndex <= 0) return null;
+  if (rightEndIndex <= 0) {
+    console.warn("[watermark-diagnostic] decodeNumericUserIdFromFrame0: rightEndIndex <= 0", {
+      height,
+      patchCols,
+      groupsPerColumn: Math.floor(height / 5),
+    });
+    return null;
+  }
 
   const rightSide = getRightSideRowSums(givenFrame, rightEndIndex);
-  return decodeNumericUserIdFromRightSide(rightSide);
+  const numericUserId = decodeNumericUserIdFromRightSide(rightSide);
+
+  console.log("[watermark-diagnostic] decodeNumericUserIdFromFrame0", {
+    cropWidth: width,
+    cropHeight: height,
+    patchRows,
+    patchCols,
+    rightEndIndex,
+    rightSideLength: rightSide.length,
+    rightSideFirst63: rightSide.slice(0, 63),
+    numericUserId: numericUserId ?? null,
+  });
+
+  return numericUserId;
 }
 
 export function getLeftSideSignature(
@@ -251,14 +285,28 @@ export async function verifyFrame(
   signatureBytes: Uint8Array
 ): Promise<boolean> {
   const messageBytes = buildMessageBytes(rightSide);
-  if (messageBytes.length === 0) return false;
+  if (messageBytes.length === 0) {
+    console.warn("[watermark-diagnostic] verifyFrame: empty message (rightSide too short)");
+    return false;
+  }
 
-  return crypto.subtle.verify(
+  const verified = await crypto.subtle.verify(
     {name: "RSASSA-PKCS1-v1_5"},
     publicKey,
     signatureBytes as BufferSource,
     messageBytes as BufferSource
   );
+
+  console.log("[watermark-diagnostic] verifyFrame", {
+    rightSideLength: rightSide.length,
+    messageByteLength: messageBytes.length,
+    rightSideFirst20: rightSide.slice(0, 20),
+    signatureFirst8: Array.from(signatureBytes.slice(0, 8)),
+    signatureLast4: Array.from(signatureBytes.slice(252, 256)),
+    verified,
+  });
+
+  return verified;
 }
 
 export async function decodeAndVerifyFrame(
@@ -267,6 +315,7 @@ export async function decodeAndVerifyFrame(
 ): Promise<{verified: boolean; numericUserId: number | null}> {
   const {luma, width, height} = cropToMultipleOf16(imageData);
   if (width === 0 || height === 0) {
+    console.warn("[watermark-diagnostic] decodeAndVerifyFrame: zero crop");
     return {verified: false, numericUserId: null};
   }
 
@@ -274,12 +323,21 @@ export async function decodeAndVerifyFrame(
   const patchCols = givenFrame[0]?.length ?? 0;
   const rightEndIndex = getRightEndIndex(height, patchCols);
   if (rightEndIndex <= 0) {
+    console.warn("[watermark-diagnostic] decodeAndVerifyFrame: rightEndIndex <= 0");
     return {verified: false, numericUserId: null};
   }
 
   const rightSide = getRightSideRowSums(givenFrame, rightEndIndex);
   const numericUserId = decodeNumericUserIdFromRightSide(rightSide);
   const signatureBytes = getLeftSideSignature(luma, width, height, rightEndIndex);
+
+  console.log("[watermark-diagnostic] decodeAndVerifyFrame input", {
+    cropWidth: width,
+    cropHeight: height,
+    rightEndIndex,
+    rightSideLength: rightSide.length,
+    numericUserId: numericUserId ?? null,
+  });
 
   const verified = await verifyFrame(publicKey, rightSide, signatureBytes);
   return {verified, numericUserId};

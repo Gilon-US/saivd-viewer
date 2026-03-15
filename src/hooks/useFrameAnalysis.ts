@@ -86,7 +86,11 @@ export function useFrameAnalysis(
 
       const imageData = captureFrameToImageData(video);
       if (!imageData) {
-        console.warn("[useFrameAnalysis] Frame capture failed at frame", currentFrame);
+        console.warn("[verify-diagnostic] Ongoing verify: frame capture failed", {
+          frame: currentFrame,
+          videoWidth: video.videoWidth,
+          videoHeight: video.videoHeight,
+        });
         setVerificationFailed(true);
         isVerifyingRef.current = false;
         frameCountRef.current = currentFrame + 1;
@@ -105,12 +109,15 @@ export function useFrameAnalysis(
           })
           .then(({verified}) => {
             if (!verified) {
-              console.warn("[useFrameAnalysis] Signature verify failed for frame", currentFrame);
+              console.warn("[verify-diagnostic] Ongoing verify: signature failed (frame " + currentFrame + ")", {
+                frame: currentFrame,
+                hint: "Check [watermark-diagnostic] verifyFrame for this frame's rightSide/signature.",
+              });
               setVerificationFailed(true);
             }
           })
           .catch((err) => {
-            console.warn("[useFrameAnalysis] Verify error for frame", currentFrame, err);
+            console.warn("[verify-diagnostic] Ongoing verify error", { frame: currentFrame, err });
             setVerificationFailed(true);
           })
           .finally(() => {
@@ -126,12 +133,15 @@ export function useFrameAnalysis(
       decodeAndVerifyFrame(key, imageData)
         .then(({verified}) => {
           if (!verified) {
-            console.warn("[useFrameAnalysis] Signature verify failed for frame", currentFrame);
+            console.warn("[verify-diagnostic] Ongoing verify: signature failed (frame " + currentFrame + ")", {
+              frame: currentFrame,
+              hint: "Check [watermark-diagnostic] verifyFrame for this frame's rightSide/signature.",
+            });
             setVerificationFailed(true);
           }
         })
         .catch((err) => {
-          console.warn("[useFrameAnalysis] Verify error for frame", currentFrame, err);
+          console.warn("[verify-diagnostic] Ongoing verify error", { frame: currentFrame, err });
           setVerificationFailed(true);
         })
         .finally(() => {
