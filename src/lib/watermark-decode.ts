@@ -324,6 +324,7 @@ export async function importPublicKeyFromPem(pem: string): Promise<CryptoKey> {
   );
 }
 
+/** Message from first 100 rightSide values (variable-length, no padding). Matches encoder. */
 export function buildMessageBytes(rightSide: number[]): Uint8Array {
   const len = Math.min(MAX_MESSAGE_LENGTH, rightSide.length);
   const chars: string[] = [];
