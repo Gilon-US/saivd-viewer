@@ -237,6 +237,36 @@ function cropToMultipleOf16(
 }
 ```
 
+### 3.4 Frame 0 Capture: WebCodecs (Preferred) vs Canvas
+
+The encoder writes the watermark into the **raw Y (luma)** plane from the codec. For the best match with the encoder’s values (and reliable RSA verification), obtain frame 0 luma **without** going through RGB. When the browser supports it, use **WebCodecs** to decode the first frame and read the Y plane directly. Otherwise fall back to canvas capture and BT.709 luma.
+
+#### Option A – WebCodecs (recommended when available)
+
+1. **Fetch** the start of the video with an HTTP **Range** request (e.g. first 4–8 MB for faststart MP4).
+2. **Demux** the MP4 container (e.g. with a JavaScript library such as mp4box.js) to obtain:
+   - Codec config (e.g. avcC for H.264) and codec string for `VideoDecoder.configure()`.
+   - The first video chunk (sample at time 0) as encoded data.
+3. **Configure and run** the browser’s **VideoDecoder** (WebCodecs) to decode that chunk into a **VideoFrame**.
+4. **Read the Y plane** from the frame (I420: plane 0 is luma; NV12: first `width×height` bytes are luma). Copy into a contiguous `Uint8Array`, stride‑aware if needed.
+5. **Crop** to multiples of 16, then run the same pipeline as above: patch matrix → right side row sums → decode `numeric_user_id`; for verification, same pipeline plus left‑side signature and `crypto.subtle.verify`.
+
+No WebAssembly is required: WebCodecs is a browser API; demux can be done with a JavaScript MP4 parser.
+
+#### Option B – Canvas fallback
+
+When WebCodecs or demux is unavailable (or fails), use the existing flow:
+
+- Set the `<video>` `src`, wait for `seeked` at `currentTime = 0`.
+- Capture frame 0 with `captureFrameToImageData(video)` → `getImageData`.
+- Convert RGB to **limited‑range BT.709 luma** (§3.2), **crop** to multiples of 16 (§3.3), then run the same decode/verify pipeline.
+
+Canvas‑derived luma can differ slightly from the encoder’s codec Y, so RSA verification may fail on some valid videos; the app may treat “decode success + public key fetched” as sufficient in that case.
+
+#### Decoding process (summary)
+
+End‑to‑end when using WebCodecs: **Range request** → **demux** (JS) → **decode one frame** (VideoDecoder) → **Y plane** → **crop to 16** → existing **decode/verify** (same constants and formulas as §4–7).
+
 ---
 
 ## 4. Patch Matrix and Right Side Row Sums
@@ -580,25 +610,14 @@ async function decodeAndVerifyFrame(
 
 This is a reference algorithm for a third‑party Next.js app or coding AI:
 
-1. **Load the video** into a `<video>` element with `crossOrigin="anonymous"`.
-2. Wait for `loadeddata` (and optionally `seeked` to `currentTime = 0`).
-3. **Capture frame 0** to `ImageData` via a hidden `<canvas>`.
-4. Run `decodeNumericUserIdFromFrame0(imageData)`:
-   - If it returns `null` or `<= 0`, treat the video as **not authentic**.
-5. Call the SAVD app’s **public endpoint**:
-   - `GET https://<savd-origin>/api/users/{numericUserId}/public-key`
-   - No authentication required.
-   - Parse `public_key_pem` from the JSON response.
-6. Import the public key with `importPublicKeyFromPem(public_key_pem)`.
-7. Optionally, for additional security:
-   - Use `decodeAndVerifyFrame(publicKey, imageData)` on:
-     - Frame 0.
-     - Frames 10, 20, 30, … captured during playback.
-8. Decide UX behavior:
-   - If user ID decode succeeds but RSA fails, you may:
-     - Block playback and label video as “not authentic”, **or**
-     - Allow playback but show a “verification incomplete” warning.
-   - If both user ID decode and RSA verification succeed, show “Verified” state.
+1. **Obtain frame 0 luma** (see **§3.4**):
+   - **When available**, use **WebCodecs**: Range request → demux → VideoDecoder → Y plane → crop to 16. Then run `decodeNumericUserIdFromLuma(luma, width, height)` and (for verification) `decodeAndVerifyFrameFromLuma(publicKey, luma, width, height)`.
+   - If WebCodecs is unsupported or fails, **load the video** into a `<video>` with `crossOrigin="anonymous"`, wait for `loadeddata` and `seeked` to `currentTime = 0`, **capture frame 0** to `ImageData` via a hidden `<canvas>`, then use `decodeNumericUserIdFromFrame0(imageData)` and `decodeAndVerifyFrame(publicKey, imageData)`.
+2. If decode returns `null` or `<= 0`, treat the video as **not authentic**.
+3. Call the SAVD app’s **public endpoint**: `GET https://<savd-origin>/api/users/{numericUserId}/public-key` (no auth). Parse `public_key_pem` from the JSON response.
+4. Import the public key with `importPublicKeyFromPem(public_key_pem)`.
+5. Optionally verify: use `decodeAndVerifyFrame` (canvas path) or `decodeAndVerifyFrameFromLuma` (WebCodecs path) on frame 0 and on frames 10, 20, 30, … during playback.
+6. Decide UX: if user ID decode succeeds but RSA fails, either block playback or allow with a warning; if both decode and RSA succeed, show “Verified”.
 
 ---
 

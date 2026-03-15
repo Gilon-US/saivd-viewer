@@ -7,9 +7,12 @@ import {LoadingSpinner} from "@/components/ui/loading-spinner";
 import {
   captureFrameToImageData,
   decodeNumericUserIdFromFrame0,
+  decodeNumericUserIdFromLuma,
   importPublicKeyFromPem,
   decodeAndVerifyFrame,
+  decodeAndVerifyFrameFromLuma,
 } from "@/lib/watermark-decode";
+import { getFrame0LumaFromUrl } from "@/lib/watermark-webcodecs";
 
 type VerificationStatus = "idle" | "verifying" | "verified" | "failed";
 
@@ -34,10 +37,14 @@ export function VideoPlayer({videoUrl, videoId, onClose, isOpen, enableFrameAnal
   const [verificationStatus, setVerificationStatus] = useState<VerificationStatus>("idle");
   const [initialNumericUserId, setInitialNumericUserId] = useState<number | null>(null);
   const [publicKeyPem, setPublicKeyPem] = useState<string | null>(null);
+  /** When enableFrameAnalysis: "" until verification decides; then videoUrl. When !enableFrameAnalysis: videoUrl. */
+  const [videoSrc, setVideoSrc] = useState("");
   const abortControllerRef = useRef<AbortController | null>(null);
   const initialVerifyDoneRef = useRef(false);
   /** Guard: set as soon as we start verification so we don't run again on every seeked event. */
   const verificationStartedRef = useRef(false);
+  /** True when WebCodecs failed and we're using canvas fallback (run runInitialVerification on seeked). */
+  const canvasFallbackRequiredRef = useRef(false);
 
   // Ongoing verification every 10th frame during playback
   const {verificationFailed} = useFrameAnalysis(
@@ -202,16 +209,103 @@ export function VideoPlayer({videoUrl, videoId, onClose, isOpen, enableFrameAnal
       setVerificationStatus("idle");
       setInitialNumericUserId(null);
       setPublicKeyPem(null);
+      setVideoSrc("");
       initialVerifyDoneRef.current = false;
       verificationStartedRef.current = false;
+      canvasFallbackRequiredRef.current = false;
     }
   }, [isOpen, videoId]);
 
-  // Start verification when player opens with frame analysis enabled
+  // When opening with frame analysis disabled: set src and allow playback
   useEffect(() => {
-    if (!isOpen || !enableFrameAnalysis || !videoId) return;
+    if (!isOpen || enableFrameAnalysis) return;
+    setVideoSrc(videoUrl);
+    setVerificationStatus("verified");
+  }, [isOpen, enableFrameAnalysis, videoUrl]);
+
+  // WebCodecs-first verification (verify before setting video src when possible)
+  useEffect(() => {
+    if (!isOpen || !enableFrameAnalysis || !videoId || !videoUrl) return;
+
     setVerificationStatus("verifying");
-  }, [isOpen, enableFrameAnalysis, videoId]);
+    setVideoSrc("");
+    canvasFallbackRequiredRef.current = false;
+
+    const abortController = new AbortController();
+    abortControllerRef.current = abortController;
+
+    (async () => {
+      try {
+        const lumaResult = await getFrame0LumaFromUrl(videoUrl, abortController.signal);
+        if (abortController.signal.aborted) return;
+
+        if (lumaResult) {
+          const numericUserId = decodeNumericUserIdFromLuma(
+            lumaResult.luma,
+            lumaResult.width,
+            lumaResult.height
+          );
+          if (abortController.signal.aborted) return;
+          if (numericUserId == null || numericUserId <= 0) {
+            setVerificationStatus("failed");
+            return;
+          }
+
+          const publicKeyUrl = `${SAIVD_API_ORIGIN}/api/users/${numericUserId}/public-key`;
+          const res = await fetch(publicKeyUrl, {
+            signal: abortController.signal,
+            credentials: "omit",
+          });
+          if (abortController.signal.aborted) return;
+          if (!res.ok) {
+            setVerificationStatus("failed");
+            return;
+          }
+
+          const body = await res.json().catch(() => ({}));
+          const publicKeyPemValue = body.data?.public_key_pem as string | undefined;
+          if (!body.success || !publicKeyPemValue) {
+            setVerificationStatus("failed");
+            return;
+          }
+
+          const publicKey = await importPublicKeyFromPem(publicKeyPemValue);
+          const result = await decodeAndVerifyFrameFromLuma(
+            publicKey,
+            lumaResult.luma,
+            lumaResult.width,
+            lumaResult.height
+          );
+          if (abortController.signal.aborted) return;
+
+          if (result.verified) {
+            setInitialNumericUserId(numericUserId);
+            setPublicKeyPem(publicKeyPemValue);
+            initialVerifyDoneRef.current = true;
+            setVerificationStatus("verified");
+            setVideoSrc(videoUrl);
+          } else {
+            setVerificationStatus("failed");
+          }
+          return;
+        }
+
+        // WebCodecs failed or unsupported: fall back to canvas
+        canvasFallbackRequiredRef.current = true;
+        setVideoSrc(videoUrl);
+      } catch {
+        if (abortController.signal.aborted) return;
+        canvasFallbackRequiredRef.current = true;
+        setVideoSrc(videoUrl);
+      } finally {
+        abortControllerRef.current = null;
+      }
+    })();
+
+    return () => {
+      abortController.abort();
+    };
+  }, [isOpen, enableFrameAnalysis, videoId, videoUrl]);
 
   // Run initial verification when video has loaded and seeked to 0
   const handleCanPlay = useCallback(() => {
@@ -225,6 +319,7 @@ export function VideoPlayer({videoUrl, videoId, onClose, isOpen, enableFrameAnal
 
   const handleSeeked = useCallback(() => {
     if (
+      !canvasFallbackRequiredRef.current ||
       verificationStartedRef.current ||
       initialVerifyDoneRef.current ||
       verificationStatus !== "verifying" ||
@@ -321,7 +416,7 @@ export function VideoPlayer({videoUrl, videoId, onClose, isOpen, enableFrameAnal
         <div className="relative bg-black rounded-lg overflow-hidden">
           <video
             ref={videoRef}
-            src={videoUrl}
+            src={videoSrc || undefined}
             crossOrigin="anonymous"
             className="w-full aspect-video"
             onTimeUpdate={handleTimeUpdate}

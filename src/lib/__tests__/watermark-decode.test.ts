@@ -14,6 +14,8 @@ import {
   getRightSideRowSums,
   buildPatchMatrix,
   buildMessageBytes,
+  decodeNumericUserIdFromLuma,
+  decodeAndVerifyFrameFromLuma,
   PATCH_SIZE,
   REPS,
   USER_ID_DIGITS,
@@ -118,6 +120,83 @@ describe("watermark-decode", () => {
       expect(REPS).toBe(7);
       expect(USER_ID_DIGITS).toBe(9);
       expect(MAX_MESSAGE_LENGTH).toBe(100);
+    });
+  });
+
+  describe("decodeNumericUserIdFromLuma", () => {
+    it("returns null for zero width", () => {
+      expect(decodeNumericUserIdFromLuma(new Uint8Array(0), 0, 16)).toBeNull();
+    });
+    it("returns null for zero height", () => {
+      expect(decodeNumericUserIdFromLuma(new Uint8Array(256), 16, 0)).toBeNull();
+    });
+    it("returns null when width is not multiple of 16", () => {
+      const luma = new Uint8Array(20 * 16);
+      expect(decodeNumericUserIdFromLuma(luma, 20, 16)).toBeNull();
+    });
+    it("returns null when height is not multiple of 16", () => {
+      const luma = new Uint8Array(16 * 20);
+      expect(decodeNumericUserIdFromLuma(luma, 16, 20)).toBeNull();
+    });
+    it("returns null when luma is shorter than width*height", () => {
+      expect(decodeNumericUserIdFromLuma(new Uint8Array(10), 16, 16)).toBeNull();
+    });
+    it("returns null when frame too small (rightEndIndex <= 0)", () => {
+      const luma = new Uint8Array(16 * 16);
+      expect(decodeNumericUserIdFromLuma(luma, 16, 16)).toBeNull();
+    });
+    it("returns numeric user id for synthetic luma that yields 9 zero digits", () => {
+      const width = 176;
+      const height = 144;
+      const luma = new Uint8Array(width * height);
+      for (let i = 0; i < luma.length; i++) luma[i] = 0;
+      const result = decodeNumericUserIdFromLuma(luma, width, height);
+      expect(result).toBe(0);
+    });
+  });
+
+  describe("decodeAndVerifyFrameFromLuma", () => {
+    const mockKey = {} as CryptoKey;
+    const verifyMock = jest.fn().mockResolvedValue(false);
+    let origSubtle: typeof globalThis.crypto.subtle | undefined;
+
+    beforeAll(() => {
+      if (globalThis.crypto?.subtle) {
+        origSubtle = globalThis.crypto.subtle;
+        (globalThis.crypto as { subtle: { verify: jest.Mock } }).subtle = { verify: verifyMock };
+      } else {
+        (globalThis as { crypto: { subtle: { verify: jest.Mock } } }).crypto = { subtle: { verify: verifyMock } };
+      }
+    });
+    afterAll(() => {
+      if (origSubtle) {
+        (globalThis.crypto as { subtle: typeof origSubtle }).subtle = origSubtle;
+      }
+    });
+
+    it("returns verified false and numericUserId null for zero width", async () => {
+      const result = await decodeAndVerifyFrameFromLuma(mockKey, new Uint8Array(0), 0, 16);
+      expect(result).toEqual({ verified: false, numericUserId: null });
+    });
+    it("returns verified false and numericUserId null for invalid dimensions", async () => {
+      const result = await decodeAndVerifyFrameFromLuma(mockKey, new Uint8Array(100), 10, 10);
+      expect(result.verified).toBe(false);
+      expect(result.numericUserId).toBeNull();
+    });
+    it("returns numericUserId from valid luma and runs verify", async () => {
+      const mockCrypto = { subtle: { verify: verifyMock } };
+      Object.defineProperty(globalThis, "crypto", { value: mockCrypto, writable: true, configurable: true });
+      try {
+        const width = 176;
+        const height = 144;
+        const luma = new Uint8Array(width * height);
+        const result = await decodeAndVerifyFrameFromLuma(mockKey, luma, width, height);
+        expect(result.numericUserId).toBe(0);
+        expect(typeof result.verified).toBe("boolean");
+        expect(verifyMock).toHaveBeenCalled();
+      } finally {
+        delete (globalThis as { crypto?: unknown }).crypto;
+      }
     });
   });
 });

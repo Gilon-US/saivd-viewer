@@ -18,6 +18,11 @@ jest.mock('@/hooks/useFrameAnalysis', () => ({
   useFrameAnalysis: jest.fn(() => ({ verificationFailed: false })),
 }));
 
+// Mock watermark-webcodecs so WebCodecs path returns null (canvas fallback in tests)
+jest.mock('@/lib/watermark-webcodecs', () => ({
+  getFrame0LumaFromUrl: jest.fn(() => Promise.resolve(null)),
+}));
+
 // Mock watermark-decode so we can control frame 0 RSA verify result
 jest.mock('@/lib/watermark-decode', () => ({
   captureFrameToImageData: jest.fn(() => ({
@@ -26,8 +31,10 @@ jest.mock('@/lib/watermark-decode', () => ({
     height: 240,
   })),
   decodeNumericUserIdFromFrame0: jest.fn(() => 123),
+  decodeNumericUserIdFromLuma: jest.fn(() => null),
   importPublicKeyFromPem: jest.fn(() => Promise.resolve({})),
   decodeAndVerifyFrame: jest.fn().mockResolvedValue({ verified: true }),
+  decodeAndVerifyFrameFromLuma: jest.fn().mockResolvedValue({ verified: true }),
 }));
 
 describe('VideoPlayer', () => {
@@ -57,9 +64,11 @@ describe('VideoPlayer', () => {
     expect(video).not.toBeInTheDocument();
   });
 
-  it('displays the correct video URL', () => {
+  it('displays the correct video URL', async () => {
     render(<VideoPlayer {...defaultProps} />);
-    
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 10));
+    });
     const video = document.querySelector('video');
     expect(video).toHaveAttribute('src', defaultProps.videoUrl);
   });
@@ -73,9 +82,19 @@ describe('VideoPlayer', () => {
     expect(mockOnClose).toHaveBeenCalledTimes(1);
   });
 
-  it('play/pause controls only visible when verified', () => {
-    // Without verification success, controls are hidden - so no play button in document
-    render(<VideoPlayer {...defaultProps} />);
+  it('play/pause controls only visible when verified', async () => {
+    // With enableFrameAnalysis, we stay in "verifying" until WebCodecs or canvas path completes.
+    // getFrame0LumaFromUrl returns null so we fall back to canvas; we never set verified in this test.
+    render(
+      <VideoPlayer
+        {...defaultProps}
+        enableFrameAnalysis
+        videoId="test-id"
+      />
+    );
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 50));
+    });
     expect(screen.queryByLabelText('Play')).not.toBeInTheDocument();
   });
 
@@ -112,9 +131,17 @@ describe('VideoPlayer', () => {
     expect(screen.getByLabelText('Close video player')).toBeInTheDocument();
   });
 
-  it('shows not authentic when frame 0 RSA verify fails', async () => {
+  it('shows not authentic when frame 0 RSA verify fails (WebCodecs path)', async () => {
+    const watermarkWebcodecs = require('@/lib/watermark-webcodecs');
     const watermarkDecode = require('@/lib/watermark-decode');
-    watermarkDecode.decodeAndVerifyFrame.mockResolvedValueOnce({ verified: false });
+
+    watermarkWebcodecs.getFrame0LumaFromUrl.mockResolvedValueOnce({
+      luma: new Uint8Array(176 * 144),
+      width: 176,
+      height: 144,
+    });
+    watermarkDecode.decodeNumericUserIdFromLuma.mockReturnValueOnce(123);
+    watermarkDecode.decodeAndVerifyFrameFromLuma.mockResolvedValueOnce({ verified: false, numericUserId: 123 });
 
     const origFetch = global.fetch;
     global.fetch = jest.fn().mockResolvedValue({
@@ -129,13 +156,6 @@ describe('VideoPlayer', () => {
         enableFrameAnalysis
       />
     );
-
-    const video = document.querySelector('video');
-    if (video) {
-      Object.defineProperty(video, 'readyState', { value: 2, configurable: true });
-      Object.defineProperty(video, 'currentTime', { value: 0, configurable: true, writable: false });
-      fireEvent.seeked(video);
-    }
 
     await act(async () => {
       await new Promise((r) => setTimeout(r, 150));

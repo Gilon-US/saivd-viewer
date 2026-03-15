@@ -212,6 +212,63 @@ export function decodeNumericUserIdFromFrame0(imageData: ImageData): number | nu
   return numericUserId;
 }
 
+/**
+ * Decode numeric user ID from pre-cropped luma (e.g. from WebCodecs Y plane).
+ * Luma must be width×height with width and height multiples of PATCH_SIZE (16).
+ */
+export function decodeNumericUserIdFromLuma(
+  luma: Uint8Array,
+  width: number,
+  height: number
+): number | null {
+  if (width <= 0 || height <= 0 || width % PATCH_SIZE !== 0 || height % PATCH_SIZE !== 0) {
+    return null;
+  }
+  if (luma.length < width * height) {
+    return null;
+  }
+
+  const givenFrame = buildPatchMatrix(luma, width, height);
+  const patchCols = givenFrame[0]?.length ?? 0;
+  const rightEndIndex = getRightEndIndex(height, patchCols);
+  if (rightEndIndex <= 0) return null;
+
+  const rightSide = getRightSideRowSums(givenFrame, rightEndIndex);
+  return decodeNumericUserIdFromRightSide(rightSide);
+}
+
+/**
+ * Decode numeric user ID and verify frame from pre-cropped luma (e.g. from WebCodecs Y plane).
+ * Same pipeline as decodeAndVerifyFrame but accepts raw luma instead of ImageData.
+ */
+export async function decodeAndVerifyFrameFromLuma(
+  publicKey: CryptoKey,
+  luma: Uint8Array,
+  width: number,
+  height: number
+): Promise<{verified: boolean; numericUserId: number | null}> {
+  if (width <= 0 || height <= 0 || width % PATCH_SIZE !== 0 || height % PATCH_SIZE !== 0) {
+    return {verified: false, numericUserId: null};
+  }
+  if (luma.length < width * height) {
+    return {verified: false, numericUserId: null};
+  }
+
+  const givenFrame = buildPatchMatrix(luma, width, height);
+  const patchCols = givenFrame[0]?.length ?? 0;
+  const rightEndIndex = getRightEndIndex(height, patchCols);
+  if (rightEndIndex <= 0) {
+    return {verified: false, numericUserId: null};
+  }
+
+  const rightSide = getRightSideRowSums(givenFrame, rightEndIndex);
+  const numericUserId = decodeNumericUserIdFromRightSide(rightSide);
+  const signatureBytes = getLeftSideSignature(luma, width, height, rightEndIndex);
+
+  const verified = await verifyFrame(publicKey, rightSide, signatureBytes);
+  return {verified, numericUserId};
+}
+
 export function getLeftSideSignature(
   luma: Uint8Array,
   width: number,
