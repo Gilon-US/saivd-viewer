@@ -85,7 +85,7 @@ export function VideoPlayer({videoUrl, videoId, onClose, isOpen, enableFrameAnal
   }, [isOpen, enableFrameAnalysis, videoUrl]);
 
   // WebCodecs-only verification (per docs: Y channel must come from codec, not canvas)
-  const WEBCODECS_TIMEOUT_MS = 12000;
+  const WEBCODECS_TIMEOUT_MS = 20000;
 
   useEffect(() => {
     if (!isOpen || !enableFrameAnalysis || !videoId || !videoUrl) return;

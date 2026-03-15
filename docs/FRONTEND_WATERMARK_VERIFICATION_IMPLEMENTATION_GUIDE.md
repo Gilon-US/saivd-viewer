@@ -243,7 +243,7 @@ The encoder writes the watermark into the **raw Y (luma)** plane from the codec.
 
 #### Option A – WebCodecs (required in this app)
 
-1. **Fetch** the start of the video with an HTTP **Range** request (e.g. first 4–8 MB for faststart MP4).
+1. **Fetch** the start of the video with an HTTP **Range** request (e.g. first 4–8 MB). This app expects **faststart MP4 only** (moov atom at beginning).
 2. **Demux** the MP4 container (e.g. with a JavaScript library such as mp4box.js) to obtain:
    - Codec config (e.g. avcC for H.264) and codec string for `VideoDecoder.configure()`.
    - The first video chunk (sample at time 0) as encoded data.

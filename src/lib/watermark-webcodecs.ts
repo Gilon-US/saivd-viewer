@@ -1,13 +1,12 @@
 /**
  * WebCodecs-based frame 0 luma extraction for watermark verification.
- * Fetches the video via Range request(s), demuxes with mp4box,
+ * Fetches the start of the video via Range request, demuxes with mp4box,
  * decodes the first frame with VideoDecoder, and returns the Y plane (cropped to 16).
- * Supports faststart (moov at start) and non-faststart (moov at end) MP4.
+ * Expects faststart MP4 only (moov atom at beginning).
  */
 
-const RANGE_BYTES = 8 * 1024 * 1024; // 8 MB for faststart MP4 or mdat start
-const TAIL_BYTES = 5 * 1024 * 1024; // 5 MB for non-faststart moov at end
-const MOOV_READY_TIMEOUT_MS = 2500;
+const RANGE_BYTES = 8 * 1024 * 1024; // 8 MB for faststart MP4 (moov + start of mdat)
+const SAMPLES_TIMEOUT_MS = 8000; // max wait for onSamples after start()
 const PATCH_SIZE = 16;
 
 export type Frame0LumaResult = {
@@ -72,6 +71,7 @@ export async function getFrame0LumaFromUrl(
       setExtractionOptions: (id: number, user: unknown, opts: { nbSamples: number }) => void;
       start: () => void;
       flush: () => void;
+      seek: (time: number, useRap: boolean) => { offset: number; time: number };
     };
 
     let resolveReady: (info: { tracks: Array<{ id: number; codec: string; video?: { width: number; height: number } }> }) => void;
@@ -93,46 +93,9 @@ export async function getFrame0LumaFromUrl(
     file.appendBuffer(buf);
     file.flush();
 
-    let info: { tracks: Array<{ id: number; codec: string; video?: { width: number; height: number } }> };
-    try {
-      info = await Promise.race([
-        readyPromise,
-        new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error("moov_timeout")), MOOV_READY_TIMEOUT_MS)
-        ),
-      ]);
-    } catch (e) {
-      if (signal?.aborted) return null;
-      if (e instanceof Error && e.message === "moov_timeout") {
-        console.log("[webcodecs-diagnostic] Moov not in first range; trying non-faststart (fetch end of file)");
-        const headRes = await fetch(videoUrl, { method: "HEAD", signal });
-        const contentLength = headRes.headers.get("Content-Length");
-        if (!contentLength) {
-          console.warn("[webcodecs-diagnostic] No Content-Length for tail fetch");
-          return null;
-        }
-        const total = parseInt(contentLength, 10);
-        if (!Number.isFinite(total) || total <= 0) return null;
-        const tailStart = Math.max(0, total - TAIL_BYTES);
-        const tailRes = await fetch(videoUrl, {
-          method: "GET",
-          headers: { Range: `bytes=${tailStart}-${total - 1}` },
-          signal,
-        });
-        if (!tailRes.ok) return null;
-        const tailAb = await tailRes.arrayBuffer();
-        if (signal?.aborted) return null;
-        const tailBuf = tailAb as ArrayBuffer & { fileStart?: number };
-        tailBuf.fileStart = tailStart;
-        file.appendBuffer(tailBuf);
-        file.flush();
-        info = await readyPromise;
-      } else {
-        throw e;
-      }
-    }
+    const info = await readyPromise;
     if (signal?.aborted) return null;
-    console.log("[webcodecs-diagnostic] MP4 moov ready", { tracks: info.tracks?.length, trackIds: info.tracks?.map((t) => t.id) });
+    console.log("[webcodecs-diagnostic] MP4 moov ready (faststart)", { tracks: info.tracks?.length, trackIds: info.tracks?.map((t) => t.id) });
 
     const videoTrack = info.tracks.find((t) => t.video != null);
     if (!videoTrack) {
@@ -140,11 +103,52 @@ export async function getFrame0LumaFromUrl(
       return null;
     }
 
+    const seekResult = file.seek(0, true);
+    const firstSampleOffset = seekResult.offset;
+    console.log("[webcodecs-diagnostic] seek(0, true) offset", firstSampleOffset);
+
     file.setExtractionOptions(videoTrack.id, null, { nbSamples: 1 });
     file.start();
+
+    if (firstSampleOffset >= ab.byteLength) {
+      console.warn("[webcodecs-diagnostic] First sample offset beyond initial range; fetching sample chunk", {
+        offset: firstSampleOffset,
+        haveBytes: ab.byteLength,
+      });
+      const chunkSize = Math.min(2 * 1024 * 1024, RANGE_BYTES);
+      const sampleRes = await fetch(videoUrl, {
+        method: "GET",
+        headers: { Range: `bytes=${firstSampleOffset}-${firstSampleOffset + chunkSize - 1}` },
+        signal,
+      });
+      if (!sampleRes.ok || signal?.aborted) return null;
+      const sampleAb = await sampleRes.arrayBuffer();
+      if (signal?.aborted) return null;
+      const sampleBuf = sampleAb as ArrayBuffer & { fileStart?: number };
+      sampleBuf.fileStart = firstSampleOffset;
+      file.appendBuffer(sampleBuf);
+    } else {
+      const chunkLen = Math.min(1024 * 1024, ab.byteLength - firstSampleOffset);
+      const chunk = ab.slice(firstSampleOffset, firstSampleOffset + chunkLen);
+      const chunkCopy = new ArrayBuffer(chunk.byteLength);
+      new Uint8Array(chunkCopy).set(new Uint8Array(chunk));
+      (chunkCopy as ArrayBuffer & { fileStart?: number }).fileStart = firstSampleOffset;
+      file.appendBuffer(chunkCopy as ArrayBuffer & { fileStart?: number });
+    }
     file.flush();
 
-    const samples = await samplesPromise;
+    const samples = await Promise.race([
+      samplesPromise,
+      new Promise<Array<{ description?: unknown; is_rap?: boolean; cts: number; data: ArrayBuffer }>>((_, reject) =>
+        setTimeout(() => reject(new Error("samples_timeout")), SAMPLES_TIMEOUT_MS)
+      ),
+    ]).catch((e) => {
+      if (e instanceof Error && e.message === "samples_timeout") {
+        console.warn("[webcodecs-diagnostic] Samples extraction timed out");
+        return [];
+      }
+      throw e;
+    });
     if (signal?.aborted) return null;
     if (samples.length === 0) {
       console.warn("[webcodecs-diagnostic] No samples extracted (mdat may be beyond range or demux needs more data)");
@@ -200,8 +204,10 @@ export async function getFrame0LumaFromUrl(
     });
     decoder.configure(config as VideoDecoderConfig);
 
+    const sampleObj = sample as { is_rap?: boolean; is_sync?: boolean; cts: number; data: ArrayBuffer };
+    const isKeyFrame = sampleObj.is_rap ?? sampleObj.is_sync ?? true;
     const chunk = new EncodedVideoChunk({
-      type: sample.is_rap ? "key" : "delta",
+      type: isKeyFrame ? "key" : "delta",
       timestamp: sample.cts,
       duration: 0,
       data: sample.data,
