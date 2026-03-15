@@ -243,15 +243,15 @@ The encoder writes the watermark into the **raw Y (luma)** plane from the codec.
 
 #### Option A – WebCodecs (required in this app)
 
-1. **Fetch** the start of the video with an HTTP **Range** request (e.g. first 4–8 MB). This app expects **faststart MP4 only** (moov atom at beginning).
-2. **Demux** the MP4 container (e.g. with a JavaScript library such as mp4box.js) to obtain:
+1. **Fetch** the start of the video with an HTTP **Range** request (e.g. first 8 MB, then 16 MB if needed). This app expects **faststart MP4 only** (moov atom at beginning).
+2. **Demux** with **web-demuxer (WASM)** per `docs/THIRD_PARTY_NEXTJS_APP_IMPLEMENTATION_GUIDE.md`: build a `File` from the buffer, load via `WebDemuxer({ wasmFilePath: absoluteUrl })`, then `getDecoderConfig('video')` and `seek('video', 0)` to obtain:
    - Codec config (e.g. avcC for H.264) and codec string for `VideoDecoder.configure()`.
    - The first video chunk (sample at time 0) as encoded data.
 3. **Configure and run** the browser’s **VideoDecoder** (WebCodecs) to decode that chunk into a **VideoFrame**.
 4. **Read the Y plane** from the frame (I420: plane 0 is luma; NV12: first `width×height` bytes are luma). Copy into a contiguous `Uint8Array`, stride‑aware if needed.
 5. **Crop** to multiples of 16, then run the same pipeline as above: patch matrix → right side row sums → decode `numeric_user_id`; for verification, same pipeline plus left‑side signature and `crypto.subtle.verify`.
 
-No WebAssembly is required: WebCodecs is a browser API; demux can be done with a JavaScript MP4 parser.
+This app uses **web-demuxer** (WASM) for demux; the full WASM file must be served at e.g. `origin/wasm/web-demuxer.wasm`.
 
 #### Option B – Canvas fallback (not used in this app)
 
@@ -265,7 +265,7 @@ Canvas‑derived luma can differ from the encoder’s codec Y, so RSA verificati
 
 #### Decoding process (summary)
 
-End‑to‑end when using WebCodecs: **Range request** → **demux** (JS) → **decode one frame** (VideoDecoder) → **Y plane** → **crop to 16** → existing **decode/verify** (same constants and formulas as §4–7).
+End‑to‑end when using WebCodecs: **Range request** → **File** → **web-demuxer (WASM)** load → getDecoderConfig, seek to 0 → **decode one frame** (VideoDecoder) → **Y plane** (I420/NV12 plane 0) → **crop to 16** → existing **decode/verify** (same constants and formulas as §4–7). See `docs/THIRD_PARTY_NEXTJS_APP_IMPLEMENTATION_GUIDE.md` for exact steps.
 
 ---
 
