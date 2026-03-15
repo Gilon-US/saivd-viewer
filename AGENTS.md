@@ -165,8 +165,8 @@ Thumbnail generation is client-side in `utils/videoThumbnail.ts` (canvas + video
 ## 8. Video Playback and QR Code
 
 1. **Grid**: User clicks thumbnail → `GET /api/videos/[id]/play?variant=watermarked` → receives presigned URL.
-2. **Player**: `VideoPlayer` opens with that URL. Video has `crossOrigin="anonymous"` for canvas access.
-3. **Verification**: Frame 0 verification **prefers WebCodecs** (Range request → JS demux → VideoDecoder → Y plane → crop to 16) so luma matches the encoder; see `docs/FRONTEND_WATERMARK_VERIFICATION_IMPLEMENTATION_GUIDE.md` §3.4. When WebCodecs is available and succeeds, the app verifies **before** setting `video.src`; on success it sets `video.src` and marks verified. If WebCodecs fails or is unsupported, it falls back to **canvas** (set `video.src`, wait for `seeked` at 0, capture frame → BT.709 luma → decode/verify). Decoded `numeric_user_id` is used to fetch the public key from the **external** SAIVD API: `GET {NEXT_PUBLIC_SAIVD_API_URL}/api/users/{numericUserId}/public-key`. If decode or fetch fails → "This video is not authentic". RSA verification is required when using WebCodecs luma; for the canvas fallback, decode + key fetch may be accepted as verified (canvas luma can differ from encoder Y). Ongoing verification (every 10th frame) uses the same key locally.
+2. **Player**: `VideoPlayer` opens with that URL. Video has `crossOrigin="anonymous"`.
+3. **Verification**: Frame 0 verification **must use WebCodecs** (Y channel from codec; canvas-derived luma is not used). Range request(s) → JS demux (mp4box) → VideoDecoder → Y plane → crop to 16; see `docs/FRONTEND_WATERMARK_VERIFICATION_IMPLEMENTATION_GUIDE.md` §3.4. Supports faststart and non-faststart MP4. Verification runs **before** setting `video.src`; on success the app sets `video.src` and marks verified. If WebCodecs is unsupported or fails (demux/decode/timeout), playback is **blocked** and a failure message is shown (no canvas fallback). Decoded `numeric_user_id` is used to fetch the public key from the **external** SAIVD API: `GET {NEXT_PUBLIC_SAIVD_API_URL}/api/users/{numericUserId}/public-key`. RSA verification is required for frame 0. Ongoing verification (every 10th frame during playback) is **not** implemented (would require WebCodecs per-frame capture).
 4. **Ongoing verification**: During playback, `useFrameAnalysis` runs every 10th frame (10, 20, 30, …): capture frame, build right_side and left_side, run **signature verification** with the already-fetched public key; if verify returns false → set `verificationFailed`, VideoPlayer pauses and shows "not authentic".
 5. **QR URL**: Uses the **numeric** user ID decoded from frame 0: `{NEXT_PUBLIC_SAIVD_API_URL}/profile/{numericUserId}/qr`.
 6. **Overlay**: QR code + logo flip animation (see `docs/qr-logo-flip-animation-implementation-guide.md`). Shown only when `verificationStatus === "verified"` and `qrUrl` is set.
@@ -192,7 +192,7 @@ Thumbnail generation is client-side in `utils/videoThumbnail.ts` (canvas + video
 | Gotcha | Resolution |
 |--------|------------|
 | `watermarked_not_available` | Use `processed_url ?? original_url` for watermarked playback. |
-| Verification requires CORS | Video must use `crossOrigin="anonymous"` so canvas `getImageData` is not tainted. |
+| Verification requires WebCodecs | Decoding uses WebCodecs Y plane only; canvas is not used for verification. |
 | Netlify build fails (Node version) | Requires Node 20. Set `NODE_VERSION=20` and `AWS_LAMBDA_JS_RUNTIME=nodejs20.x` in `netlify.toml`. |
 | Upload spinner not showing | Match `currentUpload` by file properties (name, size, lastModified) from `uploads` map; don't rely on internal `uploadId` state. |
 | Portrait/MOV thumbnails broken | Use `object-contain`, `seekTime` ≥ 0.5s, delay after `seeked`, handle canvas aspect ratio. |
@@ -215,7 +215,7 @@ Thumbnail generation is client-side in `utils/videoThumbnail.ts` (canvas + video
 | Document | Purpose |
 |----------|---------|
 | `docs/THIRD_PARTY_NEXTJS_APP_IMPLEMENTATION_GUIDE.md` | Third-party playback/verification flow, block play until verify, QR URL, constants (§5) |
-| `docs/FRONTEND_WATERMARK_VERIFICATION_IMPLEMENTATION_GUIDE.md` | Client-side decode, WebCodecs vs canvas (§3.4), public-key API, RSA verify, every-10th-frame verification |
+| `docs/FRONTEND_WATERMARK_VERIFICATION_IMPLEMENTATION_GUIDE.md` | Client-side decode, WebCodecs-only frame 0 (§3.4), public-key API, RSA verify |
 | `docs/video-player-implementation-guide.md` | Frame analysis, verification, QR logic (may reference legacy extract-user-id) |
 | `docs/qr-logo-flip-animation-implementation-guide.md` | QR/logo overlay CSS and React structure |
 | `docs/watermark-api-integration-guide.md` | External watermark API contract |

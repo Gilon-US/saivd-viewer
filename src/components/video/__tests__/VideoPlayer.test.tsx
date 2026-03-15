@@ -18,8 +18,9 @@ jest.mock('@/hooks/useFrameAnalysis', () => ({
   useFrameAnalysis: jest.fn(() => ({ verificationFailed: false })),
 }));
 
-// Mock watermark-webcodecs so WebCodecs path returns null (canvas fallback in tests)
+// Mock watermark-webcodecs: supported; getFrame0LumaFromUrl controlled per test
 jest.mock('@/lib/watermark-webcodecs', () => ({
+  isWebCodecsSupported: jest.fn(() => true),
   getFrame0LumaFromUrl: jest.fn(() => Promise.resolve(null)),
 }));
 
@@ -121,8 +122,7 @@ describe('VideoPlayer', () => {
         videoId="vid-1"
       />
     );
-    // Component starts in verifying/idle; verificationFailed triggers failed state when status was verified.
-    // Without getting to verified first we may not see the message. Just ensure no crash.
+    // When verificationFailed becomes true while status was verified, we set failed and pause. Ensure no crash.
     expect(screen.getByLabelText('Close video player')).toBeInTheDocument();
   });
 
@@ -161,7 +161,7 @@ describe('VideoPlayer', () => {
       await new Promise((r) => setTimeout(r, 150));
     });
 
-    expect(screen.getByText(/This video is not authentic|viewing not allowed/i)).toBeInTheDocument();
+    expect(screen.getByText(/Verification failed|WebCodecs|not authentic/i)).toBeInTheDocument();
     global.fetch = origFetch;
   });
 });

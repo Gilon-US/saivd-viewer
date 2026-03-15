@@ -1,11 +1,13 @@
 /**
  * WebCodecs-based frame 0 luma extraction for watermark verification.
- * Fetches the start of the video via Range request, demuxes with mp4box,
+ * Fetches the video via Range request(s), demuxes with mp4box,
  * decodes the first frame with VideoDecoder, and returns the Y plane (cropped to 16).
- * Use when available for best match to encoder codec Y; fall back to canvas otherwise.
+ * Supports faststart (moov at start) and non-faststart (moov at end) MP4.
  */
 
-const RANGE_BYTES = 8 * 1024 * 1024; // 8 MB for faststart MP4
+const RANGE_BYTES = 8 * 1024 * 1024; // 8 MB for faststart MP4 or mdat start
+const TAIL_BYTES = 5 * 1024 * 1024; // 5 MB for non-faststart moov at end
+const MOOV_READY_TIMEOUT_MS = 2500;
 const PATCH_SIZE = 16;
 
 export type Frame0LumaResult = {
@@ -31,19 +33,25 @@ export async function getFrame0LumaFromUrl(
   signal?: AbortSignal
 ): Promise<Frame0LumaResult | null> {
   if (!isWebCodecsSupported()) {
+    console.log("[webcodecs-diagnostic] VideoDecoder not supported; returning null");
     return null;
   }
 
   try {
+    console.log("[webcodecs-diagnostic] Fetching range 0–" + (RANGE_BYTES - 1));
     const res = await fetch(videoUrl, {
       method: "GET",
       headers: { Range: `bytes=0-${RANGE_BYTES - 1}` },
       signal,
     });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      console.warn("[webcodecs-diagnostic] Range fetch not ok", { status: res.status, statusText: res.statusText });
+      return null;
+    }
 
     const ab = await res.arrayBuffer();
     if (signal?.aborted) return null;
+    console.log("[webcodecs-diagnostic] Range received", { bytes: ab.byteLength });
 
     const MP4Box = await import("mp4box");
     const file = MP4Box.createFile() as {
@@ -85,18 +93,64 @@ export async function getFrame0LumaFromUrl(
     file.appendBuffer(buf);
     file.flush();
 
-    const info = await readyPromise;
+    let info: { tracks: Array<{ id: number; codec: string; video?: { width: number; height: number } }> };
+    try {
+      info = await Promise.race([
+        readyPromise,
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error("moov_timeout")), MOOV_READY_TIMEOUT_MS)
+        ),
+      ]);
+    } catch (e) {
+      if (signal?.aborted) return null;
+      if (e instanceof Error && e.message === "moov_timeout") {
+        console.log("[webcodecs-diagnostic] Moov not in first range; trying non-faststart (fetch end of file)");
+        const headRes = await fetch(videoUrl, { method: "HEAD", signal });
+        const contentLength = headRes.headers.get("Content-Length");
+        if (!contentLength) {
+          console.warn("[webcodecs-diagnostic] No Content-Length for tail fetch");
+          return null;
+        }
+        const total = parseInt(contentLength, 10);
+        if (!Number.isFinite(total) || total <= 0) return null;
+        const tailStart = Math.max(0, total - TAIL_BYTES);
+        const tailRes = await fetch(videoUrl, {
+          method: "GET",
+          headers: { Range: `bytes=${tailStart}-${total - 1}` },
+          signal,
+        });
+        if (!tailRes.ok) return null;
+        const tailAb = await tailRes.arrayBuffer();
+        if (signal?.aborted) return null;
+        const tailBuf = tailAb as ArrayBuffer & { fileStart?: number };
+        tailBuf.fileStart = tailStart;
+        file.appendBuffer(tailBuf);
+        file.flush();
+        info = await readyPromise;
+      } else {
+        throw e;
+      }
+    }
     if (signal?.aborted) return null;
+    console.log("[webcodecs-diagnostic] MP4 moov ready", { tracks: info.tracks?.length, trackIds: info.tracks?.map((t) => t.id) });
 
     const videoTrack = info.tracks.find((t) => t.video != null);
-    if (!videoTrack) return null;
+    if (!videoTrack) {
+      console.warn("[webcodecs-diagnostic] No video track found");
+      return null;
+    }
 
     file.setExtractionOptions(videoTrack.id, null, { nbSamples: 1 });
     file.start();
     file.flush();
 
     const samples = await samplesPromise;
-    if (signal?.aborted || samples.length === 0) return null;
+    if (signal?.aborted) return null;
+    if (samples.length === 0) {
+      console.warn("[webcodecs-diagnostic] No samples extracted (mdat may be beyond range or demux needs more data)");
+      return null;
+    }
+    console.log("[webcodecs-diagnostic] First sample received", { width: videoTrack.video?.width, height: videoTrack.video?.height });
 
     const sample = samples[0];
     const codec = videoTrack.codec;
@@ -121,7 +175,10 @@ export async function getFrame0LumaFromUrl(
     if (description && description.byteLength > 0) config.description = description;
 
     const supported = await (globalThis as unknown as { VideoDecoder: { isConfigSupported: (c: unknown) => Promise<{ supported: boolean }> } }).VideoDecoder.isConfigSupported(config);
-    if (!supported?.supported) return null;
+    if (!supported?.supported) {
+      console.warn("[webcodecs-diagnostic] VideoDecoder.isConfigSupported returned false", { codec });
+      return null;
+    }
 
     let resolveFrame: (f: VideoFrame | null) => void;
     let timeoutId: ReturnType<typeof setTimeout>;
@@ -154,7 +211,10 @@ export async function getFrame0LumaFromUrl(
     decoder.close();
 
     const frame = await framePromise;
-    if (!frame) return null;
+    if (!frame) {
+      console.warn("[webcodecs-diagnostic] No VideoFrame from decoder (decode error or timeout)");
+      return null;
+    }
 
     try {
       const w = frame.displayWidth;
@@ -179,12 +239,15 @@ export async function getFrame0LumaFromUrl(
         cropped.set(luma.subarray(y * w, y * w + cropW), y * cropW);
       }
 
+      console.log("[webcodecs-diagnostic] Frame 0 luma extracted", { cropW, cropH });
       return { luma: cropped, width: cropW, height: cropH };
-    } catch {
+    } catch (e) {
+      console.warn("[webcodecs-diagnostic] copyTo or crop failed", e);
       frame.close();
       return null;
     }
-  } catch {
+  } catch (e) {
+    console.warn("[webcodecs-diagnostic] getFrame0LumaFromUrl failed", e);
     return null;
   }
 }

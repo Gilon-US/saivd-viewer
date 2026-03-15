@@ -239,9 +239,9 @@ function cropToMultipleOf16(
 
 ### 3.4 Frame 0 Capture: WebCodecs (Preferred) vs Canvas
 
-The encoder writes the watermark into the **raw Y (luma)** plane from the codec. For the best match with the encoder’s values (and reliable RSA verification), obtain frame 0 luma **without** going through RGB. When the browser supports it, use **WebCodecs** to decode the first frame and read the Y plane directly. Otherwise fall back to canvas capture and BT.709 luma.
+The encoder writes the watermark into the **raw Y (luma)** plane from the codec. For the best match with the encoder’s values (and reliable RSA verification), obtain frame 0 luma **without** going through RGB. Use **WebCodecs** to decode the first frame and read the Y plane directly. Canvas-derived luma (Option B) can differ from the encoder’s codec Y and cause RSA verification to fail on valid videos; **this app uses WebCodecs only** and blocks playback if WebCodecs is unavailable or fails.
 
-#### Option A – WebCodecs (recommended when available)
+#### Option A – WebCodecs (required in this app)
 
 1. **Fetch** the start of the video with an HTTP **Range** request (e.g. first 4–8 MB for faststart MP4).
 2. **Demux** the MP4 container (e.g. with a JavaScript library such as mp4box.js) to obtain:
@@ -253,15 +253,15 @@ The encoder writes the watermark into the **raw Y (luma)** plane from the codec.
 
 No WebAssembly is required: WebCodecs is a browser API; demux can be done with a JavaScript MP4 parser.
 
-#### Option B – Canvas fallback
+#### Option B – Canvas fallback (not used in this app)
 
-When WebCodecs or demux is unavailable (or fails), use the existing flow:
+Other implementations may fall back to canvas when WebCodecs is unavailable:
 
 - Set the `<video>` `src`, wait for `seeked` at `currentTime = 0`.
 - Capture frame 0 with `captureFrameToImageData(video)` → `getImageData`.
 - Convert RGB to **limited‑range BT.709 luma** (§3.2), **crop** to multiples of 16 (§3.3), then run the same decode/verify pipeline.
 
-Canvas‑derived luma can differ slightly from the encoder’s codec Y, so RSA verification may fail on some valid videos; the app may treat “decode success + public key fetched” as sufficient in that case.
+Canvas‑derived luma can differ from the encoder’s codec Y, so RSA verification may fail on valid videos. This viewer does **not** use canvas for verification; it requires WebCodecs and blocks playback if verification cannot be performed.
 
 #### Decoding process (summary)
 

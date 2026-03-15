@@ -5,14 +5,11 @@ import {X, Play, Pause, Volume2, VolumeX, Maximize, AlertCircle} from "lucide-re
 import {useFrameAnalysis} from "@/hooks/useFrameAnalysis";
 import {LoadingSpinner} from "@/components/ui/loading-spinner";
 import {
-  captureFrameToImageData,
-  decodeNumericUserIdFromFrame0,
   decodeNumericUserIdFromLuma,
   importPublicKeyFromPem,
-  decodeAndVerifyFrame,
   decodeAndVerifyFrameFromLuma,
 } from "@/lib/watermark-decode";
-import { getFrame0LumaFromUrl } from "@/lib/watermark-webcodecs";
+import { getFrame0LumaFromUrl, isWebCodecsSupported } from "@/lib/watermark-webcodecs";
 
 type VerificationStatus = "idle" | "verifying" | "verified" | "failed";
 
@@ -37,22 +34,19 @@ export function VideoPlayer({videoUrl, videoId, onClose, isOpen, enableFrameAnal
   const [verificationStatus, setVerificationStatus] = useState<VerificationStatus>("idle");
   const [initialNumericUserId, setInitialNumericUserId] = useState<number | null>(null);
   const [publicKeyPem, setPublicKeyPem] = useState<string | null>(null);
-  /** When enableFrameAnalysis: "" until verification decides; then videoUrl. When !enableFrameAnalysis: videoUrl. */
+  /** When enableFrameAnalysis: "" until WebCodecs verification succeeds; then videoUrl. When !enableFrameAnalysis: videoUrl. */
   const [videoSrc, setVideoSrc] = useState("");
   const abortControllerRef = useRef<AbortController | null>(null);
   const initialVerifyDoneRef = useRef(false);
-  /** Guard: set as soon as we start verification so we don't run again on every seeked event. */
-  const verificationStartedRef = useRef(false);
-  /** True when WebCodecs failed and we're using canvas fallback (run runInitialVerification on seeked). */
-  const canvasFallbackRequiredRef = useRef(false);
 
-  // Ongoing verification every 10th frame during playback
+  // Ongoing verification every 10th frame is disabled: we use WebCodecs-only (no canvas) and
+  // do not have WebCodecs-based capture for arbitrary playback frames; only frame 0 is verified.
   const {verificationFailed} = useFrameAnalysis(
     videoRef,
     isPlaying,
-    enableFrameAnalysis && verificationStatus === "verified" ? videoId ?? undefined : undefined,
+    undefined,
     initialNumericUserId,
-    publicKeyPem
+    null
   );
 
   const qrUrl =
@@ -72,137 +66,6 @@ export function VideoPlayer({videoUrl, videoId, onClose, isOpen, enableFrameAnal
     }
   }, [verificationFailed, verificationStatus]);
 
-  const runInitialVerification = useCallback(async () => {
-    const video = videoRef.current;
-    if (!video || !enableFrameAnalysis || !videoId) return;
-    if (verificationStartedRef.current) return;
-    verificationStartedRef.current = true;
-
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-    }
-    const abortController = new AbortController();
-    abortControllerRef.current = abortController;
-
-    setVerificationStatus("verifying");
-    setInitialNumericUserId(null);
-    setPublicKeyPem(null);
-    initialVerifyDoneRef.current = false;
-
-    console.log("[VideoPlayer] Initial verification started", { videoId, enableFrameAnalysis });
-
-    try {
-      console.log("[verify-diagnostic] Frame 0 capture", {
-        videoWidth: video.videoWidth,
-        videoHeight: video.videoHeight,
-        readyState: video.readyState,
-        currentTime: video.currentTime,
-      });
-      const imageData = captureFrameToImageData(video);
-      if (abortController.signal.aborted || !imageData) {
-        console.warn("[VideoPlayer] Initial verification failed: frame capture failed or aborted", {
-          hasImageData: !!imageData,
-          aborted: abortController.signal.aborted,
-        });
-        setVerificationStatus("failed");
-        return;
-      }
-      console.log("[verify-diagnostic] Frame 0 imageData", {
-        width: imageData.width,
-        height: imageData.height,
-        dataLength: imageData.data.length,
-      });
-
-      const numericUserId = decodeNumericUserIdFromFrame0(imageData);
-      if (abortController.signal.aborted || numericUserId == null || numericUserId <= 0) {
-        console.warn("[verify-diagnostic] Frame 0 decode failed", {
-          numericUserId: numericUserId ?? "null",
-          aborted: abortController.signal.aborted,
-          hint: "Check [watermark-diagnostic] logs for rightSide/rightEndIndex; encoder may use different crop or patch formula.",
-        });
-        setVerificationStatus("failed");
-        return;
-      }
-      console.log("[verify-diagnostic] Frame 0 decoded numeric_user_id", { numericUserId });
-
-      const publicKeyUrl = `${SAIVD_API_ORIGIN}/api/users/${numericUserId}/public-key`;
-      console.log("[VideoPlayer] Fetching public key", { url: publicKeyUrl });
-      const res = await fetch(publicKeyUrl, {
-        signal: abortController.signal,
-        credentials: "omit",
-      });
-      if (abortController.signal.aborted) return;
-
-      if (!res.ok) {
-        console.warn("[verify-diagnostic] Public key fetch failed", {
-          numericUserId,
-          status: res.status,
-          statusText: res.statusText,
-          hint: "404 = user/key not found for this ID; check decoded numeric_user_id matches encoder.",
-        });
-        setVerificationStatus("failed");
-        return;
-      }
-
-      const body = await res.json().catch(() => ({}));
-      if (!body.success || !body.data?.public_key_pem) {
-        console.warn("[verify-diagnostic] Invalid public key response", {
-          numericUserId,
-          success: body.success,
-          hasPem: !!(body.data?.public_key_pem),
-          bodyKeys: body?.data ? Object.keys(body.data) : [],
-        });
-        setVerificationStatus("failed");
-        return;
-      }
-
-      const publicKeyPemValue = body.data.public_key_pem as string;
-      console.log("[VideoPlayer] Public key received", {
-        pemLength: publicKeyPemValue?.length ?? 0,
-      });
-
-      setInitialNumericUserId(numericUserId);
-      setPublicKeyPem(publicKeyPemValue);
-
-      // RSA verify for frame 0; accept as verified when decode + key succeed (canvas luma can differ from encoder codec Y)
-      let verified = false;
-      try {
-        const publicKey = await importPublicKeyFromPem(publicKeyPemValue);
-        const result = await decodeAndVerifyFrame(publicKey, imageData);
-        verified = result.verified;
-        console.log("[verify-diagnostic] Frame 0 RSA result", {
-          verified: result.verified,
-          numericUserIdFromVerify: result.numericUserId,
-          hint: !result.verified && "Check [watermark-diagnostic] verifyFrame for rightSide/signature vs encoder.",
-        });
-      } catch (rsaErr) {
-        console.warn("[verify-diagnostic] Frame 0 RSA verify error", rsaErr);
-      }
-
-      if (abortController.signal.aborted) return;
-
-      const rsaVerifiedResult = verified;
-      if (!verified) {
-        // Canvas capture → BT.709 luma often differs from encoder's codec Y, so RSA can fail on valid videos.
-        // Treat as verified when decode and public key succeeded (decode-only verification fallback).
-        console.warn("[verify-diagnostic] Frame 0 RSA verify false; accepting as verified (decode + key OK). Canvas luma may differ from encoder codec Y.");
-        verified = true;
-      }
-
-      console.log("[VideoPlayer] Frame 0 verified", { numericUserId, rsaVerified: rsaVerifiedResult });
-      setVerificationStatus("verified");
-      initialVerifyDoneRef.current = true;
-      console.log("[VideoPlayer] Initial verification complete", { numericUserId });
-    } catch (err) {
-      if (abortController.signal.aborted) return;
-      console.error("[VideoPlayer] Initial verification error:", err);
-      setVerificationStatus("failed");
-    } finally {
-      abortControllerRef.current = null;
-      verificationStartedRef.current = false;
-    }
-  }, [enableFrameAnalysis, videoId]);
-
   // Reset when modal closes or video id changes
   useEffect(() => {
     if (!isOpen) {
@@ -211,8 +74,6 @@ export function VideoPlayer({videoUrl, videoId, onClose, isOpen, enableFrameAnal
       setPublicKeyPem(null);
       setVideoSrc("");
       initialVerifyDoneRef.current = false;
-      verificationStartedRef.current = false;
-      canvasFallbackRequiredRef.current = false;
     }
   }, [isOpen, videoId]);
 
@@ -223,113 +84,113 @@ export function VideoPlayer({videoUrl, videoId, onClose, isOpen, enableFrameAnal
     setVerificationStatus("verified");
   }, [isOpen, enableFrameAnalysis, videoUrl]);
 
-  // WebCodecs-first verification (verify before setting video src when possible)
+  // WebCodecs-only verification (per docs: Y channel must come from codec, not canvas)
+  const WEBCODECS_TIMEOUT_MS = 12000;
+
   useEffect(() => {
     if (!isOpen || !enableFrameAnalysis || !videoId || !videoUrl) return;
 
+    if (!isWebCodecsSupported()) {
+      console.warn("[verify-diagnostic] WebCodecs not supported in this browser; verification required");
+      setVerificationStatus("failed");
+      setVideoSrc("");
+      return;
+    }
+
     setVerificationStatus("verifying");
     setVideoSrc("");
-    canvasFallbackRequiredRef.current = false;
 
     const abortController = new AbortController();
     abortControllerRef.current = abortController;
 
+    const timeoutId = setTimeout(() => {
+      if (abortController.signal.aborted) return;
+      console.warn("[verify-diagnostic] WebCodecs attempt timed out", { timeoutMs: WEBCODECS_TIMEOUT_MS });
+      abortController.abort();
+    }, WEBCODECS_TIMEOUT_MS);
+
     (async () => {
       try {
         const lumaResult = await getFrame0LumaFromUrl(videoUrl, abortController.signal);
+        clearTimeout(timeoutId);
         if (abortController.signal.aborted) return;
 
-        if (lumaResult) {
-          const numericUserId = decodeNumericUserIdFromLuma(
-            lumaResult.luma,
-            lumaResult.width,
-            lumaResult.height
-          );
-          if (abortController.signal.aborted) return;
-          if (numericUserId == null || numericUserId <= 0) {
-            setVerificationStatus("failed");
-            return;
-          }
-
-          const publicKeyUrl = `${SAIVD_API_ORIGIN}/api/users/${numericUserId}/public-key`;
-          const res = await fetch(publicKeyUrl, {
-            signal: abortController.signal,
-            credentials: "omit",
-          });
-          if (abortController.signal.aborted) return;
-          if (!res.ok) {
-            setVerificationStatus("failed");
-            return;
-          }
-
-          const body = await res.json().catch(() => ({}));
-          const publicKeyPemValue = body.data?.public_key_pem as string | undefined;
-          if (!body.success || !publicKeyPemValue) {
-            setVerificationStatus("failed");
-            return;
-          }
-
-          const publicKey = await importPublicKeyFromPem(publicKeyPemValue);
-          const result = await decodeAndVerifyFrameFromLuma(
-            publicKey,
-            lumaResult.luma,
-            lumaResult.width,
-            lumaResult.height
-          );
-          if (abortController.signal.aborted) return;
-
-          if (result.verified) {
-            setInitialNumericUserId(numericUserId);
-            setPublicKeyPem(publicKeyPemValue);
-            initialVerifyDoneRef.current = true;
-            setVerificationStatus("verified");
-            setVideoSrc(videoUrl);
-          } else {
-            setVerificationStatus("failed");
-          }
+        if (!lumaResult) {
+          console.warn("[verify-diagnostic] WebCodecs returned null (demux/decode failed); verification requires WebCodecs Y channel");
+          setVerificationStatus("failed");
           return;
         }
 
-        // WebCodecs failed or unsupported: fall back to canvas
-        canvasFallbackRequiredRef.current = true;
-        setVideoSrc(videoUrl);
-      } catch {
+        console.log("[verify-diagnostic] WebCodecs frame 0 luma received", {
+          width: lumaResult.width,
+          height: lumaResult.height,
+        });
+        const numericUserId = decodeNumericUserIdFromLuma(
+          lumaResult.luma,
+          lumaResult.width,
+          lumaResult.height
+        );
         if (abortController.signal.aborted) return;
-        canvasFallbackRequiredRef.current = true;
-        setVideoSrc(videoUrl);
+        if (numericUserId == null || numericUserId <= 0) {
+          setVerificationStatus("failed");
+          return;
+        }
+
+        const publicKeyUrl = `${SAIVD_API_ORIGIN}/api/users/${numericUserId}/public-key`;
+        const res = await fetch(publicKeyUrl, {
+          signal: abortController.signal,
+          credentials: "omit",
+        });
+        if (abortController.signal.aborted) return;
+        if (!res.ok) {
+          setVerificationStatus("failed");
+          return;
+        }
+
+        const body = await res.json().catch(() => ({}));
+        const publicKeyPemValue = body.data?.public_key_pem as string | undefined;
+        if (!body.success || !publicKeyPemValue) {
+          setVerificationStatus("failed");
+          return;
+        }
+
+        const publicKey = await importPublicKeyFromPem(publicKeyPemValue);
+        const result = await decodeAndVerifyFrameFromLuma(
+          publicKey,
+          lumaResult.luma,
+          lumaResult.width,
+          lumaResult.height
+        );
+        if (abortController.signal.aborted) return;
+
+        if (result.verified) {
+          setInitialNumericUserId(numericUserId);
+          setPublicKeyPem(publicKeyPemValue);
+          initialVerifyDoneRef.current = true;
+          setVerificationStatus("verified");
+          setVideoSrc(videoUrl);
+        } else {
+          setVerificationStatus("failed");
+        }
+      } catch (err) {
+        clearTimeout(timeoutId);
+        if (abortController.signal.aborted) {
+          console.warn("[verify-diagnostic] WebCodecs aborted (e.g. timeout)");
+        } else {
+          console.warn("[verify-diagnostic] WebCodecs error", err);
+        }
+        setVerificationStatus("failed");
       } finally {
+        clearTimeout(timeoutId);
         abortControllerRef.current = null;
       }
     })();
 
     return () => {
+      clearTimeout(timeoutId);
       abortController.abort();
     };
   }, [isOpen, enableFrameAnalysis, videoId, videoUrl]);
-
-  // Run initial verification when video has loaded and seeked to 0
-  const handleCanPlay = useCallback(() => {
-    if (!initialVerifyDoneRef.current && verificationStatus === "verifying" && videoRef.current) {
-      const video = videoRef.current;
-      if (video.readyState >= 2) {
-        video.currentTime = 0;
-      }
-    }
-  }, [verificationStatus]);
-
-  const handleSeeked = useCallback(() => {
-    if (
-      !canvasFallbackRequiredRef.current ||
-      verificationStartedRef.current ||
-      initialVerifyDoneRef.current ||
-      verificationStatus !== "verifying" ||
-      !videoRef.current ||
-      videoRef.current.currentTime !== 0
-    ) {
-      return;
-    }
-    runInitialVerification();
-  }, [verificationStatus, runInitialVerification]);
 
   // Reset video state when player closes
   useEffect(() => {
@@ -421,8 +282,6 @@ export function VideoPlayer({videoUrl, videoId, onClose, isOpen, enableFrameAnal
             className="w-full aspect-video"
             onTimeUpdate={handleTimeUpdate}
             onLoadedMetadata={handleLoadedMetadata}
-            onCanPlay={handleCanPlay}
-            onSeeked={handleSeeked}
             onEnded={() => setIsPlaying(false)}
             controls={false}
           />
@@ -441,7 +300,7 @@ export function VideoPlayer({videoUrl, videoId, onClose, isOpen, enableFrameAnal
             <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/80 backdrop-blur-sm z-30">
               <AlertCircle className="w-12 h-12 text-red-500 mb-4" />
               <p className="text-white text-lg font-medium text-center px-4">
-                This video is not authentic, viewing not allowed
+                Verification failed. Authenticity must be verified using WebCodecs (Y channel); this browser or video may not support it.
               </p>
             </div>
           )}
