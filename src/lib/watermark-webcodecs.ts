@@ -9,6 +9,9 @@ const RANGE_BYTES = 8 * 1024 * 1024; // 8 MB for faststart MP4 (moov + start of 
 const SAMPLES_TIMEOUT_MS = 8000; // max wait for onSamples after start()
 const PATCH_SIZE = 16;
 
+/** Fallback H.264 codec strings to try when the container codec (e.g. avc1.4d401f) is rejected by VideoDecoder.isConfigSupported. */
+const AVC1_FALLBACK_CODECS = ["avc1.42E01E", "avc1.4d401f", "avc1.4d001f", "avc1.64001f", "avc1.640028"];
+
 export type Frame0LumaResult = {
   luma: Uint8Array;
   width: number;
@@ -171,18 +174,34 @@ export async function getFrame0LumaFromUrl(
       description = stream.buffer.slice(0, stream.position);
     }
 
-    const config: { codec: string; description?: ArrayBuffer; codedWidth: number; codedHeight: number } = {
-      codec,
+    const baseConfig = {
       codedWidth: width,
       codedHeight: height,
+      ...(description && description.byteLength > 0 ? { description } : {}),
     };
-    if (description && description.byteLength > 0) config.description = description;
-
-    const supported = await (globalThis as unknown as { VideoDecoder: { isConfigSupported: (c: unknown) => Promise<{ supported: boolean }> } }).VideoDecoder.isConfigSupported(config);
-    if (!supported?.supported) {
-      console.warn("[webcodecs-diagnostic] VideoDecoder.isConfigSupported returned false", { codec });
+    const VideoDecoderAPI = globalThis as unknown as { VideoDecoder: { isConfigSupported: (c: unknown) => Promise<{ supported: boolean }> } };
+    const codecsToTry = codec.startsWith("avc1.")
+      ? [codec, ...AVC1_FALLBACK_CODECS.filter((c) => c !== codec)]
+      : [codec];
+    let chosenCodec: string | null = null;
+    for (const candidate of codecsToTry) {
+      const supported = await VideoDecoderAPI.VideoDecoder.isConfigSupported({
+        ...baseConfig,
+        codec: candidate,
+      });
+      if (supported?.supported) {
+        chosenCodec = candidate;
+        if (candidate !== codec) {
+          console.log("[webcodecs-diagnostic] Using fallback codec for VideoDecoder", { from: codec, to: candidate });
+        }
+        break;
+      }
+    }
+    if (!chosenCodec) {
+      console.warn("[webcodecs-diagnostic] VideoDecoder.isConfigSupported returned false for all codecs tried", { codec, tried: codecsToTry });
       return null;
     }
+    const config = { ...baseConfig, codec: chosenCodec } as VideoDecoderConfig;
 
     let resolveFrame: (f: VideoFrame | null) => void;
     let timeoutId: ReturnType<typeof setTimeout>;
