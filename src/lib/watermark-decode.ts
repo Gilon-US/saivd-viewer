@@ -263,6 +263,16 @@ export async function decodeAndVerifyFrameFromLuma(
 
   const rightSide = getRightSideRowSums(givenFrame, rightEndIndex);
   const numericUserId = decodeNumericUserIdFromRightSide(rightSide);
+  const leftStartCol = rightEndIndex * PATCH_SIZE;
+  const leftWidth = width - leftStartCol;
+  console.log("[watermark-diagnostic] decodeAndVerifyFrameFromLuma region", {
+    width,
+    height,
+    patchCols,
+    rightEndIndex,
+    leftStartCol,
+    leftWidth,
+  });
   const signatureBytes = getLeftSideSignature(luma, width, height, rightEndIndex);
 
   const verified = await verifyFrame(publicKey, rightSide, signatureBytes);
@@ -361,6 +371,11 @@ export async function verifyFrame(
     signatureLast4: Array.from(signatureBytes.slice(252, 256)),
     verified,
   });
+  if (!verified) {
+    console.warn(
+      "[watermark-diagnostic] RSA verification failed. Message and signature are built from the same luma (variable-length message, no padding). If the encoder uses a different luma source (e.g. canvas vs WebCodecs Y plane) or different region/order for the 256 signature bytes, verification will fail."
+    );
+  }
 
   return verified;
 }
