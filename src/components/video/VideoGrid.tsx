@@ -48,11 +48,15 @@ export function VideoGrid({videos, isLoading, error, onRefresh, onOpenUploadModa
     videoUrl: string | null;
     videoId: string | null;
     enableFrameAnalysis: boolean;
+    verificationStatus: "verifying" | "verified" | "failed" | null;
+    verifiedUserId: string | null;
   }>({
     isOpen: false,
     videoUrl: null,
     videoId: null,
     enableFrameAnalysis: false,
+    verificationStatus: null,
+    verifiedUserId: null,
   });
 
   const [isOpeningVideo, setIsOpeningVideo] = useState<string | null>(null);
@@ -69,11 +73,14 @@ export function VideoGrid({videos, isLoading, error, onRefresh, onOpenUploadModa
         throw new Error(data.error?.message || "Failed to generate playback URL");
       }
 
+      // For watermarked videos, open player in "verifying" state; frontend verification runs in VideoPlayer
       setVideoPlayer({
         isOpen: true,
         videoUrl: data.data.playbackUrl,
         videoId: video.id,
-        enableFrameAnalysis: true, // Always enable frame analysis for watermarked videos
+        enableFrameAnalysis: true,
+        verificationStatus: "verifying",
+        verifiedUserId: null,
       });
     } catch (error) {
       console.error("Error opening video:", error);
@@ -94,6 +101,8 @@ export function VideoGrid({videos, isLoading, error, onRefresh, onOpenUploadModa
       videoUrl: null,
       videoId: null,
       enableFrameAnalysis: false,
+      verificationStatus: null,
+      verifiedUserId: null,
     });
   };
 
@@ -197,20 +206,6 @@ export function VideoGrid({videos, isLoading, error, onRefresh, onOpenUploadModa
     );
   }
 
-  // Debug: Log video data to see what URLs and thumbnails are available
-  console.log(
-    "VideoGrid received videos:",
-    videos.map((v) => ({
-      id: v.id,
-      filename: v.filename,
-      original_url: v.original_url,
-      has_original_url: !!v.original_url,
-      hasPreviewThumbnail: !!v.preview_thumbnail_data,
-      originalThumbnailUrl: v.original_thumbnail_url,
-      status: v.status,
-    }))
-  );
-
   // Video grid - responsive flex layout
   return (
     <div className="space-y-6">
@@ -292,6 +287,15 @@ export function VideoGrid({videos, isLoading, error, onRefresh, onOpenUploadModa
           onClose={handleClosePlayer}
           isOpen={videoPlayer.isOpen}
           enableFrameAnalysis={videoPlayer.enableFrameAnalysis}
+          verificationStatus={videoPlayer.verificationStatus}
+          verifiedUserId={videoPlayer.verifiedUserId}
+          onVerificationComplete={(status, userId) => {
+            setVideoPlayer((prev) => ({
+              ...prev,
+              verificationStatus: status,
+              verifiedUserId: userId,
+            }));
+          }}
         />
       )}
     </div>

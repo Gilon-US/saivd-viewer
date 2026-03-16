@@ -59,6 +59,26 @@ export function cropToMultipleOf16(
   return {luma: croppedLuma, width: croppedWidth, height: croppedHeight};
 }
 
+/**
+ * Crop raw luma (Y) to multiples of 16. Use when Y comes from a non-canvas source (e.g. WebCodecs I420 plane).
+ */
+export function cropLumaToMultipleOf16(
+  luma: Uint8Array,
+  width: number,
+  height: number
+): {luma: Uint8Array; width: number; height: number} {
+  const w = width - (width % PATCH_SIZE);
+  const h = height - (height % PATCH_SIZE);
+  if (w <= 0 || h <= 0) return {luma: new Uint8Array(0), width: 0, height: 0};
+  const cropped = new Uint8Array(w * h);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      cropped[y * w + x] = luma[y * width + x];
+    }
+  }
+  return {luma: cropped, width: w, height: h};
+}
+
 export function buildPatchMatrix(
   luma: Uint8Array,
   width: number,
@@ -213,24 +233,19 @@ export function decodeNumericUserIdFromFrame0(imageData: ImageData): number | nu
 }
 
 /**
- * Decode numeric user ID from pre-cropped luma (e.g. from WebCodecs Y plane).
- * Luma must be width×height with width and height multiples of PATCH_SIZE (16).
+ * Decode numeric user ID from raw luma (e.g. Y plane from WebCodecs).
+ * Crops to multiple of 16 internally, then builds patch matrix and decodes.
  */
 export function decodeNumericUserIdFromLuma(
   luma: Uint8Array,
   width: number,
   height: number
 ): number | null {
-  if (width <= 0 || height <= 0 || width % PATCH_SIZE !== 0 || height % PATCH_SIZE !== 0) {
-    return null;
-  }
-  if (luma.length < width * height) {
-    return null;
-  }
-
-  const givenFrame = buildPatchMatrix(luma, width, height);
+  const {luma: cropped, width: w, height: h} = cropLumaToMultipleOf16(luma, width, height);
+  if (w < PATCH_SIZE || h < PATCH_SIZE) return null;
+  const givenFrame = buildPatchMatrix(cropped, w, h);
   const patchCols = givenFrame[0]?.length ?? 0;
-  const rightEndIndex = getRightEndIndex(height, patchCols);
+  const rightEndIndex = getRightEndIndex(h, patchCols);
   if (rightEndIndex <= 0) return null;
 
   const rightSide = getRightSideRowSums(givenFrame, rightEndIndex);
@@ -238,8 +253,8 @@ export function decodeNumericUserIdFromLuma(
 }
 
 /**
- * Decode numeric user ID and verify frame from pre-cropped luma (e.g. from WebCodecs Y plane).
- * Same pipeline as decodeAndVerifyFrame but accepts raw luma instead of ImageData.
+ * Decode numeric user ID and verify frame from raw luma (e.g. Y plane from WebCodecs).
+ * Crops to multiple of 16 internally, then same pipeline as decodeAndVerifyFrame.
  */
 export async function decodeAndVerifyFrameFromLuma(
   publicKey: CryptoKey,
@@ -247,16 +262,11 @@ export async function decodeAndVerifyFrameFromLuma(
   width: number,
   height: number
 ): Promise<{verified: boolean; numericUserId: number | null}> {
-  if (width <= 0 || height <= 0 || width % PATCH_SIZE !== 0 || height % PATCH_SIZE !== 0) {
-    return {verified: false, numericUserId: null};
-  }
-  if (luma.length < width * height) {
-    return {verified: false, numericUserId: null};
-  }
-
-  const givenFrame = buildPatchMatrix(luma, width, height);
+  const {luma: cropped, width: w, height: h} = cropLumaToMultipleOf16(luma, width, height);
+  if (w < PATCH_SIZE || h < PATCH_SIZE) return {verified: false, numericUserId: null};
+  const givenFrame = buildPatchMatrix(cropped, w, h);
   const patchCols = givenFrame[0]?.length ?? 0;
-  const rightEndIndex = getRightEndIndex(height, patchCols);
+  const rightEndIndex = getRightEndIndex(h, patchCols);
   if (rightEndIndex <= 0) {
     return {verified: false, numericUserId: null};
   }
@@ -264,16 +274,16 @@ export async function decodeAndVerifyFrameFromLuma(
   const rightSide = getRightSideRowSums(givenFrame, rightEndIndex);
   const numericUserId = decodeNumericUserIdFromRightSide(rightSide);
   const leftStartCol = rightEndIndex * PATCH_SIZE;
-  const leftWidth = width - leftStartCol;
+  const leftWidth = w - leftStartCol;
   console.log("[watermark-diagnostic] decodeAndVerifyFrameFromLuma region", {
-    width,
-    height,
+    width: w,
+    height: h,
     patchCols,
     rightEndIndex,
     leftStartCol,
     leftWidth,
   });
-  const signatureBytes = getLeftSideSignature(luma, width, height, rightEndIndex);
+  const signatureBytes = getLeftSideSignature(cropped, w, h, rightEndIndex);
 
   const verified = await verifyFrame(publicKey, rightSide, signatureBytes);
   return {verified, numericUserId};

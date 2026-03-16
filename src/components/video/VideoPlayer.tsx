@@ -1,19 +1,11 @@
 "use client";
 
-import {useEffect, useRef, useState, useCallback} from "react";
-import {X, Play, Pause, Volume2, VolumeX, Maximize, AlertCircle} from "lucide-react";
-import {useFrameAnalysis} from "@/hooks/useFrameAnalysis";
+import {useEffect, useRef, useState} from "react";
+import {X, Play, Pause, Volume2, VolumeX, Maximize} from "lucide-react";
+import {useWatermarkVerification} from "@/hooks/useWatermarkVerification";
 import {LoadingSpinner} from "@/components/ui/loading-spinner";
-import {
-  decodeNumericUserIdFromLuma,
-  importPublicKeyFromPem,
-  decodeAndVerifyFrameFromLuma,
-} from "@/lib/watermark-decode";
-import { getFrame0LumaFromUrl, isWebCodecsSupported } from "@/lib/watermark-webcodecs";
 
-type VerificationStatus = "idle" | "verifying" | "verified" | "failed";
-
-/** External SAIVD API origin for public key and profile/QR. Override via NEXT_PUBLIC_SAIVD_API_URL. */
+/** External SAIVD API origin for profile/QR. Override via NEXT_PUBLIC_SAIVD_API_URL. */
 const SAIVD_API_ORIGIN =
   process.env.NEXT_PUBLIC_SAIVD_API_URL ?? "https://saivd.netlify.app";
 
@@ -23,176 +15,65 @@ interface VideoPlayerProps {
   onClose: () => void;
   isOpen: boolean;
   enableFrameAnalysis: boolean;
+  verificationStatus?: "verifying" | "verified" | "failed" | null;
+  verifiedUserId?: string | null;
+  onVerificationComplete?: (status: "verified" | "failed", userId: string | null) => void;
 }
 
-export function VideoPlayer({videoUrl, videoId, onClose, isOpen, enableFrameAnalysis}: VideoPlayerProps) {
+export function VideoPlayer({
+  videoUrl,
+  videoId,
+  onClose,
+  isOpen,
+  enableFrameAnalysis,
+  verificationStatus,
+  verifiedUserId,
+  onVerificationComplete,
+}: VideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
-  const [verificationStatus, setVerificationStatus] = useState<VerificationStatus>("idle");
-  const [initialNumericUserId, setInitialNumericUserId] = useState<number | null>(null);
-  const [publicKeyPem, setPublicKeyPem] = useState<string | null>(null);
-  /** When enableFrameAnalysis: "" until WebCodecs verification succeeds; then videoUrl. When !enableFrameAnalysis: videoUrl. */
-  const [videoSrc, setVideoSrc] = useState("");
-  const abortControllerRef = useRef<AbortController | null>(null);
-  const initialVerifyDoneRef = useRef(false);
 
-  // Ongoing verification every 10th frame is disabled: we use WebCodecs-only (no canvas) and
-  // do not have WebCodecs-based capture for arbitrary playback frames; only frame 0 is verified.
-  const {verificationFailed} = useFrameAnalysis(
-    videoRef,
-    isPlaying,
-    undefined,
-    initialNumericUserId,
-    null
-  );
+  // Prevent playback until verification passes (for watermarked videos).
+  // Only treat videos as playable when either:
+  // - verification has not been requested (null), or
+  // - verification has positively succeeded ("verified").
+  const isPlaybackAllowed = verificationStatus === null || verificationStatus === "verified";
 
-  const qrUrl =
-    initialNumericUserId != null
-      ? `${SAIVD_API_ORIGIN}/profile/${initialNumericUserId}/qr`
-      : null;
+  // Frontend watermark verification: decode frame 0, fetch public key, verify; then verify frames 10, 20, ...
+  const verificationEnabled =
+    Boolean(enableFrameAnalysis && verificationStatus === "verifying" && videoUrl) && isOpen;
+  console.log("[VideoPlayer] Render with verification state", {
+    verificationEnabled,
+    enableFrameAnalysis,
+    verificationStatus,
+    isOpen,
+    hasVideoUrl: !!videoUrl,
+    verifiedUserId,
+  });
+  useWatermarkVerification(videoRef, videoUrl ?? null, {
+    enabled: verificationEnabled,
+    onVerificationComplete,
+  });
 
-  // When ongoing verification fails, mark as failed and pause
+  // QR URL from verified user ID (parent state); no ongoing frame analysis for QR in viewer.
+  const qrUrl = verifiedUserId ? `${SAIVD_API_ORIGIN}/profile/${verifiedUserId}/qr` : null;
+
+  // Diagnostic: log when video src is withheld vs set (to trace full-video preload)
+  const videoSrcWithheld = enableFrameAnalysis && verificationStatus !== "verified";
   useEffect(() => {
-    if (verificationFailed && verificationStatus === "verified") {
-      console.warn("[VideoPlayer] Ongoing verification failed — pausing and showing not authentic");
-      setVerificationStatus("failed");
-      if (videoRef.current) {
-        videoRef.current.pause();
-        setIsPlaying(false);
-      }
-    }
-  }, [verificationFailed, verificationStatus]);
+    console.log("[Frame0Decode] Video element src", {
+      withheld: videoSrcWithheld,
+      reason: videoSrcWithheld
+        ? "verification pending or failed – video has no src (no full load)"
+        : "playback allowed – src set",
+      verificationStatus,
+      t: Math.round(performance.now()),
+    });
+  }, [videoSrcWithheld, verificationStatus]);
 
-  // Reset when modal closes or video id changes
-  useEffect(() => {
-    if (!isOpen) {
-      setVerificationStatus("idle");
-      setInitialNumericUserId(null);
-      setPublicKeyPem(null);
-      setVideoSrc("");
-      initialVerifyDoneRef.current = false;
-    }
-  }, [isOpen, videoId]);
-
-  // When opening with frame analysis disabled: set src and allow playback
-  useEffect(() => {
-    if (!isOpen || enableFrameAnalysis) return;
-    setVideoSrc(videoUrl);
-    setVerificationStatus("verified");
-  }, [isOpen, enableFrameAnalysis, videoUrl]);
-
-  // WebCodecs-only verification (per docs: Y channel must come from codec, not canvas)
-  const WEBCODECS_TIMEOUT_MS = 20000;
-
-  useEffect(() => {
-    if (!isOpen || !enableFrameAnalysis || !videoId || !videoUrl) return;
-
-    if (!isWebCodecsSupported()) {
-      console.warn("[verify-diagnostic] WebCodecs not supported in this browser; verification required");
-      setVerificationStatus("failed");
-      setVideoSrc("");
-      return;
-    }
-
-    setVerificationStatus("verifying");
-    setVideoSrc("");
-
-    const abortController = new AbortController();
-    abortControllerRef.current = abortController;
-
-    const timeoutId = setTimeout(() => {
-      if (abortController.signal.aborted) return;
-      console.warn("[verify-diagnostic] WebCodecs attempt timed out", { timeoutMs: WEBCODECS_TIMEOUT_MS });
-      abortController.abort();
-    }, WEBCODECS_TIMEOUT_MS);
-
-    (async () => {
-      try {
-        const lumaResult = await getFrame0LumaFromUrl(videoUrl, abortController.signal);
-        clearTimeout(timeoutId);
-        if (abortController.signal.aborted) return;
-
-        if (!lumaResult) {
-          console.warn("[verify-diagnostic] WebCodecs returned null (demux/decode failed); verification requires WebCodecs Y channel");
-          setVerificationStatus("failed");
-          return;
-        }
-
-        console.log("[verify-diagnostic] WebCodecs frame 0 luma received", {
-          width: lumaResult.width,
-          height: lumaResult.height,
-        });
-        const numericUserId = decodeNumericUserIdFromLuma(
-          lumaResult.luma,
-          lumaResult.width,
-          lumaResult.height
-        );
-        if (abortController.signal.aborted) return;
-        if (numericUserId == null || numericUserId <= 0) {
-          setVerificationStatus("failed");
-          return;
-        }
-
-        const publicKeyUrl = `${SAIVD_API_ORIGIN}/api/users/${numericUserId}/public-key`;
-        const res = await fetch(publicKeyUrl, {
-          signal: abortController.signal,
-          credentials: "omit",
-        });
-        if (abortController.signal.aborted) return;
-        if (!res.ok) {
-          setVerificationStatus("failed");
-          return;
-        }
-
-        const body = await res.json().catch(() => ({}));
-        const publicKeyPemValue = body.data?.public_key_pem as string | undefined;
-        if (!body.success || !publicKeyPemValue) {
-          setVerificationStatus("failed");
-          return;
-        }
-
-        const publicKey = await importPublicKeyFromPem(publicKeyPemValue);
-        const result = await decodeAndVerifyFrameFromLuma(
-          publicKey,
-          lumaResult.luma,
-          lumaResult.width,
-          lumaResult.height
-        );
-        if (abortController.signal.aborted) return;
-
-        if (result.verified) {
-          setInitialNumericUserId(numericUserId);
-          setPublicKeyPem(publicKeyPemValue);
-          initialVerifyDoneRef.current = true;
-          setVerificationStatus("verified");
-          setVideoSrc(videoUrl);
-        } else {
-          setVerificationStatus("failed");
-        }
-      } catch (err) {
-        clearTimeout(timeoutId);
-        if (abortController.signal.aborted) {
-          console.warn("[verify-diagnostic] WebCodecs aborted (e.g. timeout)");
-        } else {
-          console.warn("[verify-diagnostic] WebCodecs error", err);
-        }
-        setVerificationStatus("failed");
-      } finally {
-        clearTimeout(timeoutId);
-        abortControllerRef.current = null;
-      }
-    })();
-
-    return () => {
-      clearTimeout(timeoutId);
-      abortController.abort();
-    };
-  }, [isOpen, enableFrameAnalysis, videoId, videoUrl]);
-
-  // Reset video state when player closes
   useEffect(() => {
     if (!isOpen) {
       setIsPlaying(false);
@@ -204,8 +85,8 @@ export function VideoPlayer({videoUrl, videoId, onClose, isOpen, enableFrameAnal
   }, [isOpen]);
 
   const togglePlay = () => {
-    // Only allow playback if video is verified
-    if (verificationStatus !== "verified") {
+    // Prevent playback if verification hasn't passed
+    if (!isPlaybackAllowed) {
       return;
     }
 
@@ -213,7 +94,7 @@ export function VideoPlayer({videoUrl, videoId, onClose, isOpen, enableFrameAnal
       if (isPlaying) {
         videoRef.current.pause();
       } else {
-        // If video has ended, seek to start before playing
+        // If video has ended (currentTime >= duration), seek to start before playing
         if (videoRef.current.currentTime >= videoRef.current.duration) {
           videoRef.current.currentTime = 0;
         }
@@ -263,21 +144,21 @@ export function VideoPlayer({videoUrl, videoId, onClose, isOpen, enableFrameAnal
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-2 sm:p-4">
       <div className="relative w-full max-w-5xl">
         {/* Close button */}
         <button
           onClick={onClose}
-          className="absolute -top-12 right-0 text-white hover:text-gray-300 transition-colors"
+          className="absolute -top-10 sm:-top-12 right-0 sm:right-2 text-white hover:text-gray-300 transition-colors touch-manipulation z-30"
           aria-label="Close video player">
-          <X className="w-8 h-8" />
+          <X className="w-6 h-6 sm:w-8 sm:h-8" />
         </button>
 
         {/* Video container */}
         <div className="relative bg-black rounded-lg overflow-hidden">
           <video
             ref={videoRef}
-            src={videoSrc || undefined}
+            src={enableFrameAnalysis && verificationStatus !== "verified" ? undefined : videoUrl}
             crossOrigin="anonymous"
             className="w-full aspect-video"
             onTimeUpdate={handleTimeUpdate}
@@ -286,30 +167,31 @@ export function VideoPlayer({videoUrl, videoId, onClose, isOpen, enableFrameAnal
             controls={false}
           />
 
-          {/* Verification overlay - shows while verifying or if verification failed */}
+          {/* Verification overlay */}
           {verificationStatus === "verifying" && (
-            <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/80 backdrop-blur-sm z-30">
-              <LoadingSpinner size="lg" className="mb-4" />
-              <p className="text-white text-lg font-medium text-center px-4">
+            <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/80 z-20">
+              <LoadingSpinner size="lg" />
+              <p className="mt-4 text-white text-center px-4 max-w-md">
                 We are verifying the video&apos;s authenticity. Your video will play shortly, please wait.
               </p>
             </div>
           )}
 
           {verificationStatus === "failed" && (
-            <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/80 backdrop-blur-sm z-30">
-              <AlertCircle className="w-12 h-12 text-red-500 mb-4" />
-              <p className="text-white text-lg font-medium text-center px-4">
-                Verification failed. Authenticity must be verified using WebCodecs (Y channel); this browser or video may not support it.
-              </p>
+            <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/80 z-20">
+              <div className="bg-red-500/20 border border-red-500 rounded-lg p-6 max-w-md mx-4">
+                <p className="text-white text-center text-lg font-medium">
+                  This video is not authentic, viewing not allowed
+                </p>
+              </div>
             </div>
           )}
 
-          {/* QR code/Logo overlay - positioned at top-left corner, only show if verified */}
-          {verificationStatus === "verified" && qrUrl && (
-            <div className="absolute top-2 left-2 pointer-events-none z-20 qr-logo-flip-container">
+          {/* QR / Logo flip overlay – flips between QR code (front) and logo (back) every 6s.
+              Shown when we have a verified user ID or frame analysis returns a QR URL. */}
+          {qrUrl && isPlaybackAllowed && (
+            <div className="absolute top-2 left-2 sm:top-4 sm:left-4 pointer-events-none z-20 qr-logo-flip-container">
               <div className="qr-logo-flip-card">
-                {/* QR Code - Front face */}
                 <div className="qr-logo-flip-face qr-logo-flip-face-front">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
@@ -318,12 +200,11 @@ export function VideoPlayer({videoUrl, videoId, onClose, isOpen, enableFrameAnal
                     className="w-16 h-16 object-contain rounded-md shadow-md"
                   />
                 </div>
-                {/* Logo - Back face */}
                 <div className="qr-logo-flip-face qr-logo-flip-face-back">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
                     src="/images/saivd-logo.png"
-                    alt="SAIVD Logo"
+                    alt="Brand logo"
                     className="w-16 h-16 object-contain rounded-md shadow-md"
                   />
                 </div>
@@ -331,49 +212,49 @@ export function VideoPlayer({videoUrl, videoId, onClose, isOpen, enableFrameAnal
             </div>
           )}
 
-          {/* Custom controls - only show if verified */}
-          {verificationStatus === "verified" && (
-            <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-4 z-20">
-              {/* Seek bar */}
-              <input
-                type="range"
-                min="0"
-                max={duration || 0}
-                value={currentTime}
-                onChange={handleSeek}
-                className="w-full mb-4 h-1 bg-gray-600 rounded-lg appearance-none cursor-pointer"
-              />
+          {/* Custom controls - only shown when playback is allowed */}
+          {isPlaybackAllowed && (
+            <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-4">
+            {/* Seek bar */}
+            <input
+              type="range"
+              min="0"
+              max={duration || 0}
+              value={currentTime}
+              onChange={handleSeek}
+              className="w-full mb-4 h-1 bg-gray-600 rounded-lg appearance-none cursor-pointer"
+            />
 
-              {/* Control buttons */}
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-4">
-                  <button
-                    onClick={togglePlay}
-                    className="text-white hover:text-gray-300 transition-colors"
-                    aria-label={isPlaying ? "Pause" : "Play"}>
-                    {isPlaying ? <Pause className="w-6 h-6" /> : <Play className="w-6 h-6" />}
-                  </button>
-
-                  <button
-                    onClick={toggleMute}
-                    className="text-white hover:text-gray-300 transition-colors"
-                    aria-label={isMuted ? "Unmute" : "Mute"}>
-                    {isMuted ? <VolumeX className="w-6 h-6" /> : <Volume2 className="w-6 h-6" />}
-                  </button>
-
-                  <span className="text-white text-sm">
-                    {formatTime(currentTime)} / {formatTime(duration)}
-                  </span>
-                </div>
+            {/* Control buttons */}
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-4">
+                <button
+                  onClick={togglePlay}
+                  className="text-white hover:text-gray-300 transition-colors"
+                  aria-label={isPlaying ? "Pause" : "Play"}>
+                  {isPlaying ? <Pause className="w-6 h-6" /> : <Play className="w-6 h-6" />}
+                </button>
 
                 <button
-                  onClick={toggleFullscreen}
+                  onClick={toggleMute}
                   className="text-white hover:text-gray-300 transition-colors"
-                  aria-label="Fullscreen">
-                  <Maximize className="w-6 h-6" />
+                  aria-label={isMuted ? "Unmute" : "Mute"}>
+                  {isMuted ? <VolumeX className="w-6 h-6" /> : <Volume2 className="w-6 h-6" />}
                 </button>
+
+                <span className="text-white text-sm">
+                  {formatTime(currentTime)} / {formatTime(duration)}
+                </span>
               </div>
+
+              <button
+                onClick={toggleFullscreen}
+                className="text-white hover:text-gray-300 transition-colors"
+                aria-label="Fullscreen">
+                <Maximize className="w-6 h-6" />
+              </button>
             </div>
+          </div>
           )}
         </div>
       </div>

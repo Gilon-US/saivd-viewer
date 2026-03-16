@@ -237,11 +237,11 @@ function cropToMultipleOf16(
 }
 ```
 
-### 3.4 Frame 0 Capture: WebCodecs (Preferred) vs Canvas
+### 3.4 Frame 0 Capture: WebCodecs Only (No Canvas)
 
-The encoder writes the watermark into the **raw Y (luma)** plane from the codec. For the best match with the encoder’s values (and reliable RSA verification), obtain frame 0 luma **without** going through RGB. Use **WebCodecs** to decode the first frame and read the Y plane directly. Canvas-derived luma (Option B) can differ from the encoder’s codec Y and cause RSA verification to fail on valid videos; **this app uses WebCodecs only** and blocks playback if WebCodecs is unavailable or fails.
+**This app does not use canvas to extract Y luma for verification.** The encoder writes the watermark into the **raw Y (luma)** plane from the codec. To match the encoder’s values and pass RSA verification, frame 0 luma **must** come from **WebCodecs** (decode the first frame and read the Y plane directly). Canvas-derived luma would go through RGB and can differ from the codec Y, causing verification to fail; **this app uses WebCodecs only** and blocks playback if WebCodecs is unavailable or fails.
 
-#### Option A – WebCodecs (required in this app)
+#### WebCodecs flow (only path used in this app)
 
 1. **Fetch** the start of the video with an HTTP **Range** request (e.g. first 8 MB, then 16 MB if needed). This app expects **faststart MP4 only** (moov atom at beginning).
 2. **Demux** with **web-demuxer (WASM)** per `docs/THIRD_PARTY_NEXTJS_APP_IMPLEMENTATION_GUIDE.md`: build a `File` from the buffer, load via `WebDemuxer({ wasmFilePath: absoluteUrl })`, then `getDecoderConfig('video')` and `seek('video', 0)` to obtain:
@@ -253,15 +253,12 @@ The encoder writes the watermark into the **raw Y (luma)** plane from the codec.
 
 This app uses **web-demuxer** (WASM) for demux; the full WASM file must be served at e.g. `origin/wasm/web-demuxer.wasm`.
 
-#### Option B – Canvas fallback (not used in this app)
+#### Canvas not used
 
-Other implementations may fall back to canvas when WebCodecs is unavailable:
+This app **does not** use canvas (e.g. `getImageData` or RGB→luma conversion) for watermark verification.
 
-- Set the `<video>` `src`, wait for `seeked` at `currentTime = 0`.
-- Capture frame 0 with `captureFrameToImageData(video)` → `getImageData`.
-- Convert RGB to **limited‑range BT.709 luma** (§3.2), **crop** to multiples of 16 (§3.3), then run the same decode/verify pipeline.
+If WebCodecs is unsupported or frame‑0 capture fails, the app blocks playback and shows a verification-failed state. Other codebases may document a canvas fallback for reference; in this viewer, **only WebCodecs is used to obtain Y luma** for decode and RSA verification.
 
-Canvas‑derived luma can differ from the encoder’s codec Y, so RSA verification may fail on valid videos. This viewer does **not** use canvas for verification; it requires WebCodecs and blocks playback if verification cannot be performed.
 
 #### Decoding process (summary)
 
@@ -610,13 +607,13 @@ async function decodeAndVerifyFrame(
 
 This is a reference algorithm for a third‑party Next.js app or coding AI:
 
-1. **Obtain frame 0 luma** (see **§3.4**):
-   - **When available**, use **WebCodecs**: Range request → demux → VideoDecoder → Y plane → crop to 16. Then run `decodeNumericUserIdFromLuma(luma, width, height)` and (for verification) `decodeAndVerifyFrameFromLuma(publicKey, luma, width, height)`.
-   - If WebCodecs is unsupported or fails, **load the video** into a `<video>` with `crossOrigin="anonymous"`, wait for `loadeddata` and `seeked` to `currentTime = 0`, **capture frame 0** to `ImageData` via a hidden `<canvas>`, then use `decodeNumericUserIdFromFrame0(imageData)` and `decodeAndVerifyFrame(publicKey, imageData)`.
+1. **Obtain frame 0 luma** (see **§3.4**). **This app uses only WebCodecs** (no canvas):
+   - Range request → demux (web-demuxer) → VideoDecoder → Y plane (I420/NV12 plane 0) → crop to 16. Then run `decodeNumericUserIdFromLuma(luma, width, height)` and (for verification) `decodeAndVerifyFrameFromLuma(publicKey, luma, width, height)`.
+   - If WebCodecs is unsupported or frame‑0 capture fails, **do not** fall back to canvas; treat verification as failed and block playback.
 2. If decode returns `null` or `<= 0`, treat the video as **not authentic**.
 3. Call the SAVD app’s **public endpoint**: `GET https://<savd-origin>/api/users/{numericUserId}/public-key` (no auth). Parse `public_key_pem` from the JSON response.
 4. Import the public key with `importPublicKeyFromPem(public_key_pem)`.
-5. Optionally verify: use `decodeAndVerifyFrame` (canvas path) or `decodeAndVerifyFrameFromLuma` (WebCodecs path) on frame 0 and on frames 10, 20, 30, … during playback.
+5. Verify frame 0 with `decodeAndVerifyFrameFromLuma(publicKey, luma, width, height)` (WebCodecs luma only). This app does not use the canvas-based `decodeAndVerifyFrame` for verification.
 6. Decide UX: if user ID decode succeeds but RSA fails, either block playback or allow with a warning; if both decode and RSA succeed, show “Verified”.
 
 ---
