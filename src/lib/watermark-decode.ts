@@ -9,6 +9,8 @@ export const SIGNATURE_LENGTH = 256;
 export const USER_ID_DIGITS = 9;
 export const REPS = 7;
 export const MAX_MESSAGE_LENGTH = 100;
+export const V2_CALIBRATION_MARKER = [0, 5, 9, 0, 5, 9] as const;
+export const V2_BOOTSTRAP_FRAME_COUNT = 3;
 
 export function captureFrameToImageData(video: HTMLVideoElement): ImageData | null {
   if (video.videoWidth === 0 || video.videoHeight === 0) return null;
@@ -151,7 +153,8 @@ export function mode(arr: number[]): number | null {
  * Does not strip trailing zeros.
  */
 export function decodeNumericUserIdFromRightSide(rightSide: number[]): number | null {
-  const repsUsed = Math.min(7, Math.floor(rightSide.length / 9));
+  const fullGroups = V2_CALIBRATION_MARKER.length + USER_ID_DIGITS;
+  const repsUsed = Math.min(REPS, Math.floor(rightSide.length / fullGroups));
   if (repsUsed === 0) {
     console.warn("[watermark-decode] decodeNumericUserIdFromRightSide: not enough data", {
       rightSideLength: rightSide.length,
@@ -161,11 +164,31 @@ export function decodeNumericUserIdFromRightSide(rightSide: number[]): number | 
     return null;
   }
 
-  const values = rightSide.slice(0, 9 * repsUsed);
+  const values = rightSide.slice(0, fullGroups * repsUsed);
+  const markerValues = values.slice(0, V2_CALIBRATION_MARKER.length * repsUsed);
+  const modulo = Math.max(10, (values.length ? Math.max(...values) : 0) + 1);
+  let bestShift = 0;
+  let bestScore = Number.POSITIVE_INFINITY;
+  for (let shift = 0; shift < modulo; shift++) {
+    let score = 0;
+    for (let i = 0; i < V2_CALIBRATION_MARKER.length; i++) {
+      const group = markerValues.slice(i * repsUsed, (i + 1) * repsUsed).map((v) => (v - shift + modulo) % modulo);
+      const m = mode(group);
+      const expected = V2_CALIBRATION_MARKER[i];
+      score += m === null ? 99 : Math.abs(m - expected);
+    }
+    if (score < bestScore) {
+      bestScore = score;
+      bestShift = shift;
+    }
+    if (score === 0) break;
+  }
+  const corrected = values.map((v) => (v - bestShift + modulo) % modulo);
   const digits: number[] = [];
 
   for (let d = 0; d < USER_ID_DIGITS; d++) {
-    const group = values.slice(d * repsUsed, (d + 1) * repsUsed);
+    const start = (V2_CALIBRATION_MARKER.length + d) * repsUsed;
+    const group = corrected.slice(start, start + repsUsed);
     const m = mode(group);
     if (m === null || m < 0 || m > 9) {
       console.warn("[watermark-decode] decodeNumericUserIdFromRightSide: invalid digit", {
@@ -185,6 +208,8 @@ export function decodeNumericUserIdFromRightSide(rightSide: number[]): number | 
   const result = Number.isNaN(numericUserId) ? null : numericUserId;
   console.log("[watermark-diagnostic] decodeNumericUserIdFromRightSide", {
     repsUsed,
+    bestShift,
+    bestScore,
     digitStr,
     numericUserId: result,
     digits,

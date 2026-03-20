@@ -1,5 +1,7 @@
 # Frontend Watermark Verification – Implementation Guide (Next.js Apps)
 
+> V2 update: current strategy is documented in `docs/V2_WATERMARK_STRATEGY.md` and uses marker-aware bootstrap plus every-10th-frame runtime verification.
+
 This document describes the **end‑to‑end implementation strategy** for:
 
 - Decoding the embedded `numeric_user_id` from a watermarked video frame in the browser.

@@ -22,6 +22,8 @@ import {
   MAX_MESSAGE_LENGTH,
 } from "../watermark-decode";
 
+const V2_MARKER = [0, 5, 9, 0, 5, 9];
+
 describe("watermark-decode", () => {
   describe("mode", () => {
     it("returns null for empty array", () => {
@@ -46,17 +48,16 @@ describe("watermark-decode", () => {
     it("returns null when fewer than 9 values (repsUsed would be 0)", () => {
       expect(decodeNumericUserIdFromRightSide([1, 2, 3])).toBeNull();
     });
-    it("decodes 9-digit string from 9 groups of 1 (repsUsed=1)", () => {
-      const nineOnes = Array(9).fill(1);
-      expect(decodeNumericUserIdFromRightSide(nineOnes)).toBe(111111111);
+    it("decodes V2 marker + 9 digits (repsUsed=1)", () => {
+      const rightSide = [...V2_MARKER, 1, 1, 1, 1, 1, 1, 1, 1, 1];
+      expect(decodeNumericUserIdFromRightSide(rightSide)).toBe(111111111);
     });
     it("decodes fixed 9 digits without stripping trailing zeros", () => {
-      const rightSide = Array(9).fill(0);
-      rightSide[8] = 1;
+      const rightSide = [...V2_MARKER, 0, 0, 0, 0, 0, 0, 0, 0, 1];
       expect(decodeNumericUserIdFromRightSide(rightSide)).toBe(1);
     });
     it("returns null when digit out of range", () => {
-      expect(decodeNumericUserIdFromRightSide(Array(9).fill(10))).toBeNull();
+      expect(decodeNumericUserIdFromRightSide([...V2_MARKER, ...Array(9).fill(10)])).toBeNull();
     });
   });
 
@@ -145,13 +146,13 @@ describe("watermark-decode", () => {
       const luma = new Uint8Array(16 * 16);
       expect(decodeNumericUserIdFromLuma(luma, 16, 16)).toBeNull();
     });
-    it("returns numeric user id for synthetic luma that yields 9 zero digits", () => {
+    it("returns null for synthetic luma without encoded V2 payload", () => {
       const width = 176;
       const height = 144;
       const luma = new Uint8Array(width * height);
       for (let i = 0; i < luma.length; i++) luma[i] = 0;
       const result = decodeNumericUserIdFromLuma(luma, width, height);
-      expect(result).toBe(0);
+      expect(result).toBeNull();
     });
   });
 
@@ -183,7 +184,7 @@ describe("watermark-decode", () => {
       expect(result.verified).toBe(false);
       expect(result.numericUserId).toBeNull();
     });
-    it("returns numericUserId from valid luma and runs verify", async () => {
+    it("runs verify on valid luma input", async () => {
       const mockCrypto = { subtle: { verify: verifyMock } };
       Object.defineProperty(globalThis, "crypto", { value: mockCrypto, writable: true, configurable: true });
       try {
@@ -191,7 +192,7 @@ describe("watermark-decode", () => {
         const height = 144;
         const luma = new Uint8Array(width * height);
         const result = await decodeAndVerifyFrameFromLuma(mockKey, luma, width, height);
-        expect(result.numericUserId).toBe(0);
+        expect(result.numericUserId).toBeNull();
         expect(typeof result.verified).toBe("boolean");
         expect(verifyMock).toHaveBeenCalled();
       } finally {

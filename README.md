@@ -2,6 +2,10 @@
 
 A **viewer/player** application for uploading, viewing, and verifying watermarked videos. Built with Next.js and Wasabi Cloud Storage.
 
+## V2 Watermark Verification
+
+This viewer follows the V2 in-browser strategy. See `docs/V2_WATERMARK_STRATEGY.md` for bootstrap and every-10th-frame verification behavior.
+
 ## Purpose
 
 **SAIVD Viewer is not a “creator” app.** It does not create or apply watermarks to videos. It is the **player only**:

@@ -7,7 +7,7 @@ import {useToast} from "@/hooks/useToast";
 import {LoadingSpinner} from "@/components/ui/loading-spinner";
 import {DeleteConfirmDialog} from "./DeleteConfirmDialog";
 import {VideoPlayer} from "./VideoPlayer";
-import {useState} from "react";
+import {useState, useCallback} from "react";
 
 export type Video = {
   id: string;
@@ -60,6 +60,13 @@ export function VideoGrid({videos, isLoading, error, onRefresh, onOpenUploadModa
   });
 
   const [isOpeningVideo, setIsOpeningVideo] = useState<string | null>(null);
+  const handleVerificationComplete = useCallback((status: "verified" | "failed", userId: string | null) => {
+    setVideoPlayer((prev) => ({
+      ...prev,
+      verificationStatus: status,
+      verifiedUserId: userId,
+    }));
+  }, []);
 
   const handleVideoClick = async (video: Video) => {
     try {
@@ -289,13 +296,7 @@ export function VideoGrid({videos, isLoading, error, onRefresh, onOpenUploadModa
           enableFrameAnalysis={videoPlayer.enableFrameAnalysis}
           verificationStatus={videoPlayer.verificationStatus}
           verifiedUserId={videoPlayer.verifiedUserId}
-          onVerificationComplete={(status, userId) => {
-            setVideoPlayer((prev) => ({
-              ...prev,
-              verificationStatus: status,
-              verifiedUserId: userId,
-            }));
-          }}
+          onVerificationComplete={handleVerificationComplete}
         />
       )}
     </div>
