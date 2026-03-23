@@ -5,8 +5,8 @@ import { RefObject } from "react";
 const mockDecodeAndVerifyFrame = jest.fn();
 const mockImportPublicKeyFromPem = jest.fn();
 
-jest.mock("@/lib/watermark-decode", () => ({
-  captureFrameToImageData: jest.fn(),
+jest.mock("@/lib/watermark-verification", () => ({
+  captureVideoFrameImageData: jest.fn(),
   importPublicKeyFromPem: (pem: string) => mockImportPublicKeyFromPem(pem),
   decodeAndVerifyFrame: (...args: unknown[]) => mockDecodeAndVerifyFrame(...args),
 }));
@@ -32,10 +32,10 @@ describe("useFrameAnalysis", () => {
     });
     global.cancelAnimationFrame = jest.fn();
 
-    const { captureFrameToImageData } = require("@/lib/watermark-decode") as {
-      captureFrameToImageData: jest.Mock;
+    const { captureVideoFrameImageData } = require("@/lib/watermark-verification") as {
+      captureVideoFrameImageData: jest.Mock;
     };
-    captureFrameToImageData.mockReturnValue({
+    captureVideoFrameImageData.mockReturnValue({
       data: new Uint8ClampedArray(320 * 240 * 4),
       width: 320,
       height: 240,

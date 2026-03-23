@@ -27,6 +27,9 @@
     "paths": {
       "@/*": [
         "./src/*"
+      ],
+      "@ffmpeg/ffmpeg-esm/*": [
+        "./node_modules/@ffmpeg/ffmpeg/dist/esm/*"
       ]
     }
   },

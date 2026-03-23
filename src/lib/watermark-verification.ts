@@ -1,0 +1,482 @@
+/**
+ * Client-side watermark verification aligned with backend checklist (canvas, crop, BT.709 luma,
+ * 16x16 patch matrix, rightEndIndex, row sums factor 1, 9-digit decode from frame 0).
+ * Decodes numeric_user_id from frame 0 (no key); verifies frames 0, 10, 20, ... with RSA.
+ */
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function debugLog(...args: any[]) {
+  console.log("[WatermarkDecode]", ...args);
+}
+
+export const PATCH_SIZE = 16;
+export const FACTOR = 1;
+export const MAX_MESSAGE_LENGTH = 100;
+export const SIGNATURE_LENGTH = 256;
+export const USER_ID_DIGITS = 9;
+export const REPS = 7;
+export const V2_CALIBRATION_MARKER = [0, 5, 9, 0, 5, 9] as const;
+export const V2_BOOTSTRAP_FRAME_COUNT = 3;
+
+/** External SAIVD API origin for public key. Override via NEXT_PUBLIC_SAIVD_API_URL. */
+const SAIVD_API_ORIGIN =
+  process.env.NEXT_PUBLIC_SAIVD_API_URL ?? "https://saivd.netlify.app";
+
+export type DecodeDiagnostics = {
+  numericUserId: number | null;
+  bestScore: number;
+  bestShift: number;
+  repsUsed: number;
+  rightSideLength: number;
+  validDigits: boolean;
+};
+
+export function captureVideoFrameImageData(video: HTMLVideoElement): ImageData | null {
+  if (!video.videoWidth || !video.videoHeight) return null;
+  const canvas = document.createElement("canvas");
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return null;
+  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+  return ctx.getImageData(0, 0, canvas.width, canvas.height);
+}
+
+function imageDataToLuma(data: ImageData): Uint8Array {
+  const {width, height, data: rgba} = data;
+  const luma = new Uint8Array(width * height);
+  const scale = 219 / 255;
+  for (let i = 0; i < width * height; i++) {
+    const r = rgba[i * 4];
+    const g = rgba[i * 4 + 1];
+    const b = rgba[i * 4 + 2];
+    const yFull = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    const yLimited = 16 + scale * yFull;
+    luma[i] = Math.max(0, Math.min(255, Math.round(yLimited)));
+  }
+  return luma;
+}
+
+export function cropToMultipleOf16(
+  imageData: ImageData
+): {luma: Uint8Array; width: number; height: number} {
+  const w = imageData.width - (imageData.width % PATCH_SIZE);
+  const h = imageData.height - (imageData.height % PATCH_SIZE);
+  debugLog("cropToMultipleOf16", {
+    inputWidth: imageData.width,
+    inputHeight: imageData.height,
+    croppedWidth: w,
+    croppedHeight: h,
+  });
+  if (w <= 0 || h <= 0) {
+    debugLog("cropToMultipleOf16: dimensions too small, returning empty");
+    return {luma: new Uint8Array(0), width: 0, height: 0};
+  }
+  const luma = imageDataToLuma(imageData);
+  const cropped = new Uint8Array(w * h);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      cropped[y * w + x] = luma[y * imageData.width + x];
+    }
+  }
+  return {luma: cropped, width: w, height: h};
+}
+
+export function cropLumaToMultipleOf16(
+  luma: Uint8Array,
+  width: number,
+  height: number
+): {luma: Uint8Array; width: number; height: number} {
+  const w = width - (width % PATCH_SIZE);
+  const h = height - (height % PATCH_SIZE);
+  if (w <= 0 || h <= 0) return {luma: new Uint8Array(0), width: 0, height: 0};
+  const cropped = new Uint8Array(w * h);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      cropped[y * w + x] = luma[y * width + x];
+    }
+  }
+  return {luma: cropped, width: w, height: h};
+}
+
+export function decodeNumericUserIdFromLuma(
+  luma: Uint8Array,
+  width: number,
+  height: number
+): number | null {
+  return decodeNumericUserIdDiagnosticsFromLuma(luma, width, height).numericUserId;
+}
+
+export function decodeNumericUserIdDiagnosticsFromLuma(
+  luma: Uint8Array,
+  width: number,
+  height: number
+): DecodeDiagnostics {
+  const {luma: cropped, width: w, height: h} = cropLumaToMultipleOf16(luma, width, height);
+  if (w < PATCH_SIZE || h < PATCH_SIZE) {
+    return {
+      numericUserId: null,
+      bestScore: Number.POSITIVE_INFINITY,
+      bestShift: 0,
+      repsUsed: 0,
+      rightSideLength: 0,
+      validDigits: false,
+    };
+  }
+  const givenFrame = buildPatchMatrix(cropped, w, h);
+  const patchCols = givenFrame[0]?.length ?? 0;
+  const rightEndIndex = getRightEndIndex(h, patchCols);
+  if (rightEndIndex <= 0) {
+    return {
+      numericUserId: null,
+      bestScore: Number.POSITIVE_INFINITY,
+      bestShift: 0,
+      repsUsed: 0,
+      rightSideLength: 0,
+      validDigits: false,
+    };
+  }
+  const rightSide = getRightSideRowSums(givenFrame, rightEndIndex);
+  return decodeNumericUserIdDiagnosticsFromRightSide(rightSide);
+}
+
+export function buildPatchMatrix(luma: Uint8Array, width: number, height: number): number[][] {
+  const rows = Math.floor(height / PATCH_SIZE);
+  const cols = Math.floor(width / PATCH_SIZE);
+  const matrix: number[][] = [];
+  for (let py = 0; py < rows; py++) {
+    const row: number[] = [];
+    for (let px = 0; px < cols; px++) {
+      let sum = 0;
+      for (let dy = 0; dy < PATCH_SIZE; dy++) {
+        for (let dx = 0; dx < PATCH_SIZE; dx++) {
+          sum += luma[(py * PATCH_SIZE + dy) * width + (px * PATCH_SIZE + dx)];
+        }
+      }
+      row.push((sum + 128) >> 8);
+    }
+    matrix.push(row);
+  }
+  return matrix;
+}
+
+export function getRightEndIndex(pixelHeight: number, patchCols: number): number {
+  const groupsPerColumn = Math.floor(pixelHeight / 5);
+  if (groupsPerColumn <= 0) return 0;
+  const numLeftColumns = Math.ceil(SIGNATURE_LENGTH / groupsPerColumn);
+  debugLog("getRightEndIndex", {pixelHeight, patchCols, groupsPerColumn, numLeftColumns, rightEndIndex: Math.max(0, patchCols - numLeftColumns)});
+  return Math.max(0, patchCols - numLeftColumns);
+}
+
+export function getRightSideRowSums(
+  givenFrame: number[][],
+  rightEndIndex: number
+): number[] {
+  const patchRows = givenFrame.length;
+  const rightSide: number[] = [];
+  for (let row = 0; row < patchRows; row++) {
+    let sum = 0;
+    for (let col = 0; col < rightEndIndex && col < givenFrame[row].length; col++) {
+      sum += givenFrame[row][col];
+    }
+    rightSide.push(sum % rightEndIndex);
+  }
+  return rightSide;
+}
+
+export function decodeNumericUserIdDiagnosticsFromRightSide(rightSide: number[]): DecodeDiagnostics {
+  const fullGroups = V2_CALIBRATION_MARKER.length + USER_ID_DIGITS;
+  const repsUsed = Math.min(REPS, Math.floor(rightSide.length / fullGroups));
+  if (repsUsed < 1) {
+    debugLog("decodeNumericUserIdFromRightSide: insufficient data", {
+      rightSideLength: rightSide.length,
+      repsUsed,
+    });
+    return {
+      numericUserId: null,
+      bestScore: Number.POSITIVE_INFINITY,
+      bestShift: 0,
+      repsUsed,
+      rightSideLength: rightSide.length,
+      validDigits: false,
+    };
+  }
+  const nVals = fullGroups * repsUsed;
+  const prefix = rightSide.slice(0, nVals);
+  const markerPrefix = prefix.slice(0, V2_CALIBRATION_MARKER.length * repsUsed);
+  const modulo = Math.max(10, (prefix.length ? Math.max(...prefix) : 0) + 1);
+
+  let bestShift = 0;
+  let bestScore = Number.POSITIVE_INFINITY;
+  for (let shift = 0; shift < modulo; shift++) {
+    let score = 0;
+    for (let i = 0; i < V2_CALIBRATION_MARKER.length; i++) {
+      const group = markerPrefix.slice(i * repsUsed, (i + 1) * repsUsed).map((v) => (v - shift + modulo) % modulo);
+      const m = getMode(group);
+      const expected = V2_CALIBRATION_MARKER[i];
+      if (m === null) {
+        score += 99;
+      } else {
+        score += Math.abs(m - expected);
+      }
+    }
+    if (score < bestScore) {
+      bestScore = score;
+      bestShift = shift;
+    }
+    if (score === 0) break;
+  }
+  const corrected = prefix.map((v) => (v - bestShift + modulo) % modulo);
+  debugLog("decodeNumericUserIdFromRightSide", {
+    rightSideLength: rightSide.length,
+    repsUsed,
+    nVals,
+    bestShift,
+    bestScore,
+    first50: rightSide.slice(0, 50).join(","),
+  });
+
+  const digits: number[] = [];
+  const groupDetails: {digitIndex: number; group: number[]; mode: number | null}[] = [];
+  for (let d = 0; d < USER_ID_DIGITS; d++) {
+    const start = (V2_CALIBRATION_MARKER.length + d) * repsUsed;
+    const group = corrected.slice(start, start + repsUsed);
+    const mode = getMode(group);
+    groupDetails.push({digitIndex: d, group, mode});
+    if (mode === null || mode < 0 || mode > 9) {
+      debugLog("decodeNumericUserIdFromRightSide: invalid mode for digit", {
+        digitIndex: d,
+        mode,
+        group,
+        allGroupsSoFar: groupDetails,
+      });
+      return {
+        numericUserId: null,
+        bestScore,
+        bestShift,
+        repsUsed,
+        rightSideLength: rightSide.length,
+        validDigits: false,
+      };
+    }
+    digits.push(mode);
+  }
+
+  const digitStr = digits.join("");
+  debugLog("decodeNumericUserIdFromRightSide: decoded groups", groupDetails);
+  const parsed = parseInt(digitStr, 10);
+  if (Number.isNaN(parsed)) {
+    debugLog("decodeNumericUserIdFromRightSide: parse failed", {digitStr, parsed, digits});
+    return {
+      numericUserId: null,
+      bestScore,
+      bestShift,
+      repsUsed,
+      rightSideLength: rightSide.length,
+      validDigits: false,
+    };
+  }
+  debugLog("decodeNumericUserIdFromRightSide: success", {numericUserId: parsed, digits, digitStr});
+  return {
+    numericUserId: parsed,
+    bestScore,
+    bestShift,
+    repsUsed,
+    rightSideLength: rightSide.length,
+    validDigits: true,
+  };
+}
+
+export function decodeNumericUserIdFromRightSide(rightSide: number[]): number | null {
+  return decodeNumericUserIdDiagnosticsFromRightSide(rightSide).numericUserId;
+}
+
+function getMode(arr: number[]): number | null {
+  if (arr.length === 0) return null;
+  const counts = new Map<number, number>();
+  for (const v of arr) {
+    counts.set(v, (counts.get(v) ?? 0) + 1);
+  }
+  let maxCount = 0;
+  let mode: number | null = null;
+  for (const [v, c] of counts) {
+    if (c > maxCount || (c === maxCount && (mode === null || v < mode))) {
+      maxCount = c;
+      mode = v;
+    }
+  }
+  return mode;
+}
+
+export function getLeftSideSignature(
+  luma: Uint8Array,
+  width: number,
+  height: number,
+  rightEndIndex: number
+): Uint8Array {
+  const leftStartCol = rightEndIndex * PATCH_SIZE;
+  if (leftStartCol >= width) return new Uint8Array(SIGNATURE_LENGTH);
+  const leftWidth = width - leftStartCol;
+  const out: number[] = [];
+  for (let col = 0; col < leftWidth && out.length < SIGNATURE_LENGTH; col++) {
+    const pixelCol = leftStartCol + col;
+    for (let groupStart = 0; groupStart + 5 <= height && out.length < SIGNATURE_LENGTH; groupStart += 5) {
+      let sum = 0;
+      for (let r = 0; r < 5; r++) {
+        sum += luma[(groupStart + r) * width + pixelCol];
+      }
+      out.push(Math.max(0, Math.min(255, sum)));
+    }
+  }
+  const sig = new Uint8Array(SIGNATURE_LENGTH);
+  for (let i = 0; i < SIGNATURE_LENGTH && i < out.length; i++) {
+    sig[i] = out[i];
+  }
+  return sig;
+}
+
+export function buildMessageBytes(rightSide: number[]): Uint8Array {
+  const len = Math.min(MAX_MESSAGE_LENGTH, rightSide.length);
+  const chars: string[] = [];
+  for (let i = 0; i < len; i++) {
+    chars.push(String.fromCharCode(rightSide[i]));
+  }
+  const str = chars.join("");
+  return new TextEncoder().encode(str);
+}
+
+export async function importPublicKeyFromPem(pem: string): Promise<CryptoKey> {
+  const trimmed = pem
+    .replace(/-----BEGIN PUBLIC KEY-----/g, "")
+    .replace(/-----END PUBLIC KEY-----/g, "")
+    .replace(/\s/g, "");
+  const binary = atob(trimmed);
+  const buffer = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    buffer[i] = binary.charCodeAt(i);
+  }
+  return crypto.subtle.importKey(
+    "spki",
+    buffer,
+    {name: "RSASSA-PKCS1-v1_5", hash: "SHA-256"},
+    false,
+    ["verify"]
+  );
+}
+
+export async function verifyFrame(
+  publicKey: CryptoKey,
+  rightSide: number[],
+  signatureBytes: Uint8Array
+): Promise<boolean> {
+  const messageBytes = buildMessageBytes(rightSide);
+  if (messageBytes.length === 0) return false;
+  return crypto.subtle.verify(
+    {name: "RSASSA-PKCS1-v1_5"},
+    publicKey,
+    signatureBytes as BufferSource,
+    messageBytes as BufferSource
+  );
+}
+
+export async function decodeAndVerifyFrame(
+  publicKey: CryptoKey,
+  imageData: ImageData
+): Promise<{verified: boolean; numericUserId: number | null}> {
+  const {luma, width, height} = cropToMultipleOf16(imageData);
+  if (width < PATCH_SIZE || height < PATCH_SIZE) {
+    return {verified: false, numericUserId: null};
+  }
+  const givenFrame = buildPatchMatrix(luma, width, height);
+  const patchCols = givenFrame[0].length;
+  const rightEndIndex = getRightEndIndex(height, patchCols);
+  if (rightEndIndex <= 0) return {verified: false, numericUserId: null};
+
+  const rightSide = getRightSideRowSums(givenFrame, rightEndIndex);
+  const numericUserId = decodeNumericUserIdFromRightSide(rightSide);
+  const signatureBytes = getLeftSideSignature(luma, width, height, rightEndIndex);
+  debugLog("decodeAndVerifyFrame: signature first 16 bytes", Array.from(signatureBytes.slice(0, 16)));
+  const verified = await verifyFrame(publicKey, rightSide, signatureBytes);
+  debugLog("decodeAndVerifyFrame result", {
+    verified,
+    numericUserId,
+    rightSideLength: rightSide.length,
+  });
+  if (!verified) {
+    debugLog("RSA verification failed for this frame (signature or message mismatch)");
+  }
+  return {verified, numericUserId};
+}
+
+export async function decodeAndVerifyFrameFromLuma(
+  publicKey: CryptoKey,
+  luma: Uint8Array,
+  width: number,
+  height: number
+): Promise<{verified: boolean; numericUserId: number | null}> {
+  const {luma: cropped, width: w, height: h} = cropLumaToMultipleOf16(luma, width, height);
+  if (w < PATCH_SIZE || h < PATCH_SIZE) return {verified: false, numericUserId: null};
+  const givenFrame = buildPatchMatrix(cropped, w, h);
+  const patchCols = givenFrame[0].length;
+  const rightEndIndex = getRightEndIndex(h, patchCols);
+  if (rightEndIndex <= 0) return {verified: false, numericUserId: null};
+  const rightSide = getRightSideRowSums(givenFrame, rightEndIndex);
+  const numericUserId = decodeNumericUserIdFromRightSide(rightSide);
+  const signatureBytes = getLeftSideSignature(cropped, w, h, rightEndIndex);
+  const verified = await verifyFrame(publicKey, rightSide, signatureBytes);
+  return {verified, numericUserId};
+}
+
+export function decodeNumericUserIdFromFrame(imageData: ImageData): number | null {
+  debugLog("decodeNumericUserIdFromFrame: start", {
+    width: imageData.width,
+    height: imageData.height,
+  });
+  const {luma, width, height} = cropToMultipleOf16(imageData);
+  if (width < PATCH_SIZE || height < PATCH_SIZE) {
+    debugLog("decodeNumericUserIdFromFrame: cropped dimensions too small", {
+      width,
+      height,
+      PATCH_SIZE,
+    });
+    return null;
+  }
+  const givenFrame = buildPatchMatrix(luma, width, height);
+  const patchRows = givenFrame.length;
+  const patchCols = givenFrame[0]?.length ?? 0;
+  const rightEndIndex = getRightEndIndex(height, patchCols);
+  debugLog("decodeNumericUserIdFromFrame: patch layout", {
+    patchRows,
+    patchCols,
+    rightEndIndex,
+    pixelHeight: height,
+    groupsPerColumn: Math.floor(height / 5),
+  });
+  if (rightEndIndex <= 0) {
+    debugLog("decodeNumericUserIdFromFrame: rightEndIndex <= 0", {rightEndIndex});
+    return null;
+  }
+
+  const rightSide = getRightSideRowSums(givenFrame, rightEndIndex);
+  debugLog("decodeNumericUserIdFromFrame: rightSide (row sums, factor 1)", {
+    length: rightSide.length,
+    values: rightSide.join(","),
+    rightEndIndex,
+  });
+  return decodeNumericUserIdFromRightSide(rightSide);
+}
+
+export async function fetchPublicKeyPem(numericUserId: number): Promise<string> {
+  const res = await fetch(`${SAIVD_API_ORIGIN}/api/users/${numericUserId}/public-key`, {
+    credentials: "omit",
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body?.error?.message ?? `Failed to fetch public key: ${res.status}`);
+  }
+  const data = await res.json();
+  if (!data.success || !data.data?.public_key_pem) {
+    throw new Error("Invalid public key response");
+  }
+  return data.data.public_key_pem;
+}

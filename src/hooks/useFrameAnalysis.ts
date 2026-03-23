@@ -2,10 +2,10 @@
 
 import {useEffect, useState, useRef, RefObject} from "react";
 import {
-  captureFrameToImageData,
+  captureVideoFrameImageData,
   importPublicKeyFromPem,
   decodeAndVerifyFrame,
-} from "@/lib/watermark-decode";
+} from "@/lib/watermark-verification";
 
 const VERIFY_INTERVAL = 10; // Every 10th frame (0, 10, 20, 30, …)
 
@@ -84,7 +84,7 @@ export function useFrameAnalysis(
       lastVerifyFrameRef.current = currentFrame;
       isVerifyingRef.current = true;
 
-      const imageData = captureFrameToImageData(video);
+      const imageData = captureVideoFrameImageData(video);
       if (!imageData) {
         console.warn("[verify-diagnostic] Ongoing verify: frame capture failed", {
           frame: currentFrame,
