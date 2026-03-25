@@ -6,7 +6,7 @@ import {
   importPublicKeyFromPem,
   decodeNumericUserIdFromLuma,
 } from "@/lib/watermark-verification";
-import { captureFrame0YFromUrl } from "@/lib/webcodecs-capture";
+import { captureFrame0YFromUrl, prewarmWebCodecsCapture } from "@/lib/webcodecs-capture";
 
 export type WatermarkVerificationStatus = "idle" | "verifying" | "verified" | "failed";
 
@@ -14,6 +14,56 @@ type UseWatermarkVerificationOptions = {
   enabled: boolean;
   onVerificationComplete?: (status: "verified" | "failed", userId: string | null) => void;
 };
+
+const SESSION_KEEPALIVE_TTL_MS = 45000;
+
+type CachedFrame0 = { yPlane: Uint8Array; width: number; height: number; expiresAt: number };
+const frame0CacheByUrl = new Map<string, CachedFrame0>();
+const frame0ExpiryTimersByUrl = new Map<string, ReturnType<typeof setTimeout>>();
+
+function cloneFrame0(frame: { yPlane: Uint8Array; width: number; height: number }) {
+  return {
+    yPlane: new Uint8Array(frame.yPlane),
+    width: frame.width,
+    height: frame.height,
+  };
+}
+
+function getCachedFrame0Y(videoUrl: string): { yPlane: Uint8Array; width: number; height: number } | null {
+  const cached = frame0CacheByUrl.get(videoUrl);
+  if (!cached) return null;
+  if (cached.expiresAt <= Date.now()) {
+    frame0CacheByUrl.delete(videoUrl);
+    const timer = frame0ExpiryTimersByUrl.get(videoUrl);
+    if (timer) clearTimeout(timer);
+    frame0ExpiryTimersByUrl.delete(videoUrl);
+    return null;
+  }
+  const timer = frame0ExpiryTimersByUrl.get(videoUrl);
+  if (timer) {
+    clearTimeout(timer);
+    frame0ExpiryTimersByUrl.delete(videoUrl);
+  }
+  return cloneFrame0(cached);
+}
+
+function cacheFrame0Y(videoUrl: string, frame: { yPlane: Uint8Array; width: number; height: number }) {
+  frame0CacheByUrl.set(videoUrl, {
+    ...cloneFrame0(frame),
+    expiresAt: Date.now() + SESSION_KEEPALIVE_TTL_MS,
+  });
+}
+
+function scheduleFrame0CacheExpiry(videoUrl: string, ttlMs: number) {
+  if (!frame0CacheByUrl.has(videoUrl)) return;
+  const timer = frame0ExpiryTimersByUrl.get(videoUrl);
+  if (timer) clearTimeout(timer);
+  const nextTimer = setTimeout(() => {
+    frame0CacheByUrl.delete(videoUrl);
+    frame0ExpiryTimersByUrl.delete(videoUrl);
+  }, ttlMs);
+  frame0ExpiryTimersByUrl.set(videoUrl, nextTimer);
+}
 
 /**
  * Fetch public key PEM from external SAIVD API by numeric_user_id.
@@ -51,6 +101,10 @@ export function useWatermarkVerification(
   const publicKeyRef = useRef<CryptoKey | null>(null);
   const callbackFiredRef = useRef(false);
   const verifiedFrameIndicesRef = useRef<Set<number>>(new Set());
+  const onVerificationCompleteRef = useRef<typeof onVerificationComplete>(onVerificationComplete);
+  const verificationSessionKeyRef = useRef<string | null>(null);
+  const verificationStartedRef = useRef(false);
+  const prewarmStartedRef = useRef(false);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const debugLog = (...args: any[]) => {
@@ -58,13 +112,43 @@ export function useWatermarkVerification(
   };
 
   useEffect(() => {
+    onVerificationCompleteRef.current = onVerificationComplete;
+  }, [onVerificationComplete]);
+
+  useEffect(() => {
+    if (!enabled || !videoUrl) return;
+    if (prewarmStartedRef.current && verificationSessionKeyRef.current === videoUrl) return;
+    prewarmStartedRef.current = true;
+    verificationSessionKeyRef.current = videoUrl;
+    void prewarmWebCodecsCapture(videoUrl);
+  }, [enabled, videoUrl]);
+
+  useEffect(() => {
     debugLog("Effect start", {enabled, hasVideoUrl: !!videoUrl});
     if (!enabled || !videoUrl) {
+      const previousSessionUrl = verificationSessionKeyRef.current;
+      if (previousSessionUrl) {
+        scheduleFrame0CacheExpiry(previousSessionUrl, SESSION_KEEPALIVE_TTL_MS);
+      }
       setStatus("idle");
       setVerifiedUserId(null);
       callbackFiredRef.current = false;
+      verificationStartedRef.current = false;
+      prewarmStartedRef.current = false;
+      verificationSessionKeyRef.current = null;
       return;
     }
+    const sessionKey = videoUrl;
+    if (verificationSessionKeyRef.current !== sessionKey) {
+      verificationSessionKeyRef.current = sessionKey;
+      verificationStartedRef.current = false;
+      callbackFiredRef.current = false;
+    }
+    if (verificationStartedRef.current) {
+      debugLog("Skipping duplicate bootstrap verification in same session", {sessionKey});
+      return;
+    }
+    verificationStartedRef.current = true;
 
     const verifyStartTime = performance.now();
     console.log("[Frame0Decode] Verification starting immediately (no video element wait)", {
@@ -75,16 +159,27 @@ export function useWatermarkVerification(
     let mounted = true;
 
     const runVerification = async () => {
+      const decodeStart = performance.now();
       let numericUserId: number | null = null;
-      let webCodecsY: { yPlane: Uint8Array; width: number; height: number } | null = null;
+      let webCodecsY = getCachedFrame0Y(videoUrl);
+      if (webCodecsY) {
+        console.log("[Frame0Decode] Reusing cached frame0 decode buffer", {
+          ttlMs: SESSION_KEEPALIVE_TTL_MS,
+        });
+      }
 
-      console.log("[Frame0Decode] Calling captureFrame0YFromUrl now (Range fetch only)", {
-        t: Math.round(performance.now()),
-      });
-      try {
-        webCodecsY = await captureFrame0YFromUrl(videoUrl);
-      } catch (e) {
-        debugLog("WebCodecs capture failed (canvas path disabled)", e);
+      if (!webCodecsY) {
+        console.log("[Frame0Decode] Calling captureFrame0YFromUrl now (Range fetch only)", {
+          t: Math.round(performance.now()),
+        });
+        try {
+          webCodecsY = await captureFrame0YFromUrl(videoUrl);
+        } catch (e) {
+          debugLog("WebCodecs capture failed (canvas path disabled)", e);
+        }
+        if (webCodecsY) {
+          cacheFrame0Y(videoUrl, webCodecsY);
+        }
       }
 
       if (!mounted) return;
@@ -110,13 +205,17 @@ export function useWatermarkVerification(
         );
         console.log("[Frame0Decode] Verification finished", { status: "failed", elapsedMs: Math.round(performance.now() - verifyStartTime) });
         if (mounted) setStatus("failed");
-        if (mounted && !callbackFiredRef.current && onVerificationComplete) {
+        if (mounted && !callbackFiredRef.current && onVerificationCompleteRef.current) {
           callbackFiredRef.current = true;
-          onVerificationComplete("failed", null);
+          onVerificationCompleteRef.current("failed", null);
         }
         return;
       }
+      console.log("[Frame0Decode] Decode phase timing", {
+        frameDecodeMs: Math.round(performance.now() - decodeStart),
+      });
 
+      const keyFetchStart = performance.now();
       let pem: string | null = null;
       try {
         debugLog("Fetching public key PEM", {numericUserId});
@@ -125,6 +224,9 @@ export function useWatermarkVerification(
       } catch (e) {
         debugLog("Fetch public key failed (non-blocking)", e);
       }
+      console.log("[Frame0Decode] Key fetch timing", {
+        keyFetchMs: Math.round(performance.now() - keyFetchStart),
+      });
 
       let key: CryptoKey | null = null;
       if (pem) {
@@ -162,9 +264,9 @@ export function useWatermarkVerification(
       setVerifiedUserId(String(numericUserId));
       setStatus("verified");
       debugLog("Verification succeeded for frame 0 (user ID decoded)", {numericUserId});
-      if (!callbackFiredRef.current && onVerificationComplete) {
+      if (!callbackFiredRef.current && onVerificationCompleteRef.current) {
         callbackFiredRef.current = true;
-        onVerificationComplete("verified", String(numericUserId));
+        onVerificationCompleteRef.current("verified", String(numericUserId));
       }
     };
 
@@ -173,7 +275,7 @@ export function useWatermarkVerification(
     return () => {
       mounted = false;
     };
-  }, [enabled, videoUrl, onVerificationComplete]);
+  }, [enabled, videoUrl]);
 
   return {status, verifiedUserId};
 }

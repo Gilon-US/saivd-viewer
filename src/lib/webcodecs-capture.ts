@@ -25,6 +25,9 @@ const RANGE_STEPS_BYTES = [
   8 * 1024 * 1024,   // 8 MB – many faststart files need this for moov/stco; one request vs 1+4+8
   16 * 1024 * 1024,  // 16 MB – fallback for very large moov
 ];
+const PREWARM_RANGE_BYTES = 256 * 1024; // 256KB probe to warm connection/caches
+let demuxerImportPromise: Promise<typeof import("web-demuxer")> | null = null;
+const prewarmedUrls = new Set<string>();
 
 function getWasmAbsoluteUrl(): string {
   if (typeof window !== "undefined" && window.location?.origin) {
@@ -45,6 +48,13 @@ async function checkWasmUrl(): Promise<{ ok: boolean; status?: number; contentTy
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) };
   }
+}
+
+async function importDemuxerModule(): Promise<typeof import("web-demuxer")> {
+  if (!demuxerImportPromise) {
+    demuxerImportPromise = import("web-demuxer");
+  }
+  return demuxerImportPromise;
 }
 
 function isWebCodecsSupported(): boolean {
@@ -100,7 +110,7 @@ async function demuxFrame0FromBuffer(buffer: ArrayBuffer): Promise<WebCodecsFram
   let demuxer: import("web-demuxer").WebDemuxer | null = null;
   try {
     const file = new File([buffer], "video.mp4", {type: "video/mp4"});
-    const {WebDemuxer} = await import("web-demuxer");
+    const {WebDemuxer} = await importDemuxerModule();
     demuxer = new WebDemuxer({wasmFilePath: getWasmAbsoluteUrl()});
     await demuxer.load(file);
 
@@ -205,6 +215,28 @@ export async function captureFrame0YFromUrl(
     console.warn("[WebCodecs] captureFrame0YFromUrl failed:", msg);
     if (stack) console.warn("[WebCodecs] stack:", stack);
     return null;
+  }
+}
+
+/**
+ * Best-effort warmup for WebCodecs path: WASM URL check, demuxer module import, and tiny range probe.
+ */
+export async function prewarmWebCodecsCapture(videoUrl: string): Promise<void> {
+  if (!isWebCodecsSupported()) return;
+  if (prewarmedUrls.has(videoUrl)) return;
+  const t0 = performance.now();
+  try {
+    await checkWasmUrl();
+    await importDemuxerModule();
+    await fetchRange(videoUrl, PREWARM_RANGE_BYTES);
+    prewarmedUrls.add(videoUrl);
+  } catch {
+    // ignore warmup failures; verification path will handle/report errors
+  } finally {
+    console.log("[Frame0Decode] WebCodecs prewarm complete", {
+      prewarmMs: Math.round(performance.now() - t0),
+      prewarmed: prewarmedUrls.has(videoUrl),
+    });
   }
 }
 
