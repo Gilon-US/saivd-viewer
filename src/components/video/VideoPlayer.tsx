@@ -159,6 +159,7 @@ export function VideoPlayer({
           <video
             ref={videoRef}
             src={enableFrameAnalysis && verificationStatus !== "verified" ? undefined : videoUrl}
+            playsInline
             crossOrigin="anonymous"
             className="w-full aspect-video"
             onTimeUpdate={handleTimeUpdate}
