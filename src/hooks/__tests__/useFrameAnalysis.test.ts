@@ -1,6 +1,7 @@
 import { renderHook, act } from "@testing-library/react";
 import { useFrameAnalysis } from "../useFrameAnalysis";
 import { RefObject } from "react";
+import { captureVideoFrameImageData } from "@/lib/watermark-verification";
 
 const mockDecodeAndVerifyFrame = jest.fn();
 const mockImportPublicKeyFromPem = jest.fn();
@@ -32,10 +33,7 @@ describe("useFrameAnalysis", () => {
     });
     global.cancelAnimationFrame = jest.fn();
 
-    const { captureVideoFrameImageData } = require("@/lib/watermark-verification") as {
-      captureVideoFrameImageData: jest.Mock;
-    };
-    captureVideoFrameImageData.mockReturnValue({
+    (captureVideoFrameImageData as unknown as jest.Mock).mockReturnValue({
       data: new Uint8ClampedArray(320 * 240 * 4),
       width: 320,
       height: 240,

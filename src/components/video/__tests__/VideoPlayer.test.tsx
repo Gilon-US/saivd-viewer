@@ -1,6 +1,7 @@
 import { render, screen, fireEvent, act } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import { VideoPlayer } from '../VideoPlayer';
+import { useWatermarkVerification } from '@/hooks/useWatermarkVerification';
 
 // Mock lucide-react icons
 jest.mock('lucide-react', () => ({
@@ -30,8 +31,7 @@ describe('VideoPlayer', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    const { useWatermarkVerification } = require('@/hooks/useWatermarkVerification');
-    useWatermarkVerification.mockImplementation(() => ({ status: 'idle', verifiedUserId: null }));
+    (useWatermarkVerification as jest.Mock).mockImplementation(() => ({ status: 'idle', verifiedUserId: null }));
   });
 
   it('renders when isOpen is true', () => {
@@ -146,7 +146,6 @@ describe('VideoPlayer', () => {
   });
 
   it('calls useWatermarkVerification when verificationEnabled', () => {
-    const { useWatermarkVerification } = require('@/hooks/useWatermarkVerification');
     render(
       <VideoPlayer
         {...defaultProps}
@@ -164,9 +163,8 @@ describe('VideoPlayer', () => {
 
   it('invokes onVerificationComplete when provided and hook completes', () => {
     const onVerificationComplete = jest.fn();
-    const { useWatermarkVerification } = require('@/hooks/useWatermarkVerification');
     let captureOptions: { onVerificationComplete?: (status: "verified" | "failed", userId: string | null) => void } = {};
-    useWatermarkVerification.mockImplementation((_ref: unknown, _url: unknown, options: typeof captureOptions) => {
+    (useWatermarkVerification as jest.Mock).mockImplementation((_ref: unknown, _url: unknown, options: typeof captureOptions) => {
       captureOptions = options;
       return { status: 'verifying', verifiedUserId: null };
     });
