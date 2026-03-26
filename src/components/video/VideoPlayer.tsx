@@ -4,7 +4,6 @@ import {useEffect, useRef, useState} from "react";
 import {X, Play, Pause, Volume2, VolumeX, Maximize} from "lucide-react";
 import {useWatermarkVerification} from "@/hooks/useWatermarkVerification";
 import {LoadingSpinner} from "@/components/ui/loading-spinner";
-import { prewarmWebCodecsCapture } from "@/lib/webcodecs-capture";
 
 /** External SAIVD API origin for profile/QR. Override via NEXT_PUBLIC_SAIVD_API_URL. */
 const SAIVD_API_ORIGIN =
@@ -58,11 +57,6 @@ export function VideoPlayer({
     enabled: verificationEnabled,
     onVerificationComplete,
   });
-
-  useEffect(() => {
-    if (!isOpen || !enableFrameAnalysis || !videoUrl) return;
-    void prewarmWebCodecsCapture(videoUrl);
-  }, [isOpen, enableFrameAnalysis, videoUrl]);
 
   // QR URL from verified user ID (parent state); no ongoing frame analysis for QR in viewer.
   const qrUrl = verifiedUserId ? `${SAIVD_API_ORIGIN}/profile/${verifiedUserId}/qr` : null;

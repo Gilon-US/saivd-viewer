@@ -41,6 +41,7 @@ const pending = new Map<
 
 let activeUrl: string | null = null;
 let initMeta: {nbSamples: number; width: number; height: number} | null = null;
+let disposeTimer: ReturnType<typeof setTimeout> | null = null;
 
 function nextId(): number {
   return ++requestSeq;
@@ -103,6 +104,10 @@ function send<T extends OkMsg>(payload: Record<string, unknown>): Promise<T> {
 export async function ensureWasmVerificationSession(
   videoUrl: string
 ): Promise<{nbSamples: number; width: number; height: number} | null> {
+  if (disposeTimer) {
+    clearTimeout(disposeTimer);
+    disposeTimer = null;
+  }
   if (activeUrl === videoUrl && initMeta) {
     return initMeta;
   }
@@ -119,6 +124,24 @@ export async function ensureWasmVerificationSession(
     height: data.height,
   };
   return initMeta;
+}
+
+export async function prewarmWasmVerificationSession(videoUrl: string): Promise<void> {
+  try {
+    await ensureWasmVerificationSession(videoUrl);
+  } catch {
+    // ignore warmup failures; normal verification path will handle/report errors
+  }
+}
+
+export function scheduleDisposeWasmVerificationSession(ttlMs: number): void {
+  if (disposeTimer) {
+    clearTimeout(disposeTimer);
+  }
+  disposeTimer = setTimeout(() => {
+    disposeTimer = null;
+    void disposeWasmVerificationSession();
+  }, ttlMs);
 }
 
 export async function getFrameYFromWasm(
@@ -141,6 +164,10 @@ export async function getFrameYFromWasm(
 }
 
 export async function disposeWasmVerificationSession(): Promise<void> {
+  if (disposeTimer) {
+    clearTimeout(disposeTimer);
+    disposeTimer = null;
+  }
   activeUrl = null;
   initMeta = null;
   const w = worker;

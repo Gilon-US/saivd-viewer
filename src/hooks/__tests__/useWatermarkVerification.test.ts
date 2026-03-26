@@ -1,37 +1,42 @@
 import {act, renderHook} from "@testing-library/react";
 import {useWatermarkVerification} from "../useWatermarkVerification";
-import {captureFrame0YFromUrl, prewarmWebCodecsCapture} from "../../lib/webcodecs-capture";
+import {
+  getFrameYFromWasm,
+  prewarmWasmVerificationSession,
+  scheduleDisposeWasmVerificationSession,
+} from "../../lib/wasm-watermark-verification-client";
 import {
   decodeAndVerifyFrameFromLuma,
-  decodeNumericUserIdFromLuma,
+  decodeNumericUserIdDiagnosticsFromLuma,
   importPublicKeyFromPem,
 } from "../../lib/watermark-verification";
 
-jest.mock("../../lib/webcodecs-capture", () => ({
-  captureFrame0YFromUrl: jest.fn(),
-  prewarmWebCodecsCapture: jest.fn(),
+jest.mock("../../lib/wasm-watermark-verification-client", () => ({
+  getFrameYFromWasm: jest.fn(),
+  prewarmWasmVerificationSession: jest.fn(),
+  scheduleDisposeWasmVerificationSession: jest.fn(),
 }));
 
 jest.mock("../../lib/watermark-verification", () => ({
   decodeAndVerifyFrameFromLuma: jest.fn(),
-  decodeNumericUserIdFromLuma: jest.fn(),
+  decodeNumericUserIdDiagnosticsFromLuma: jest.fn(),
   importPublicKeyFromPem: jest.fn(),
 }));
 
-const mockedCaptureFrame0YFromUrl = captureFrame0YFromUrl as jest.MockedFunction<
-  typeof captureFrame0YFromUrl
+const mockedGetFrameYFromWasm = getFrameYFromWasm as jest.MockedFunction<typeof getFrameYFromWasm>;
+const mockedPrewarmWasmVerificationSession =
+  prewarmWasmVerificationSession as jest.MockedFunction<typeof prewarmWasmVerificationSession>;
+const mockedScheduleDisposeWasmVerificationSession =
+  scheduleDisposeWasmVerificationSession as jest.MockedFunction<typeof scheduleDisposeWasmVerificationSession>;
+
+const mockedDecodeAndVerifyFrameFromLuma = decodeAndVerifyFrameFromLuma as jest.MockedFunction<
+  typeof decodeAndVerifyFrameFromLuma
 >;
-const mockedPrewarmWebCodecsCapture = prewarmWebCodecsCapture as jest.MockedFunction<
-  typeof prewarmWebCodecsCapture
->;
-const mockedDecodeNumericUserIdFromLuma = decodeNumericUserIdFromLuma as jest.MockedFunction<
-  typeof decodeNumericUserIdFromLuma
+const mockedDecodeNumericUserIdDiagnosticsFromLuma = decodeNumericUserIdDiagnosticsFromLuma as jest.MockedFunction<
+  typeof decodeNumericUserIdDiagnosticsFromLuma
 >;
 const mockedImportPublicKeyFromPem = importPublicKeyFromPem as jest.MockedFunction<
   typeof importPublicKeyFromPem
->;
-const mockedDecodeAndVerifyFrameFromLuma = decodeAndVerifyFrameFromLuma as jest.MockedFunction<
-  typeof decodeAndVerifyFrameFromLuma
 >;
 
 async function flushAsync() {
@@ -48,12 +53,21 @@ describe("useWatermarkVerification (viewer)", () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    mockedCaptureFrame0YFromUrl.mockResolvedValue({
+    mockedGetFrameYFromWasm.mockResolvedValue({
       yPlane: new Uint8Array(16),
       width: 4,
       height: 4,
     });
-    mockedDecodeNumericUserIdFromLuma.mockReturnValue(123456789);
+    mockedPrewarmWasmVerificationSession.mockResolvedValue();
+    mockedScheduleDisposeWasmVerificationSession.mockImplementation(() => {});
+    mockedDecodeNumericUserIdDiagnosticsFromLuma.mockReturnValue({
+      numericUserId: 123456789,
+      bestScore: 0,
+      bestShift: 0,
+      repsUsed: 7,
+      rightSideLength: 120,
+      validDigits: true,
+    });
     mockedImportPublicKeyFromPem.mockResolvedValue({} as CryptoKey);
     mockedDecodeAndVerifyFrameFromLuma.mockResolvedValue({
       verified: false,
@@ -81,11 +95,35 @@ describe("useWatermarkVerification (viewer)", () => {
     expect(result.current.status).toBe("verified");
     expect(result.current.verifiedUserId).toBe("123456789");
     expect(onVerificationComplete).toHaveBeenCalledWith("verified", "123456789");
-    expect(mockedPrewarmWebCodecsCapture).toHaveBeenCalled();
+    expect(mockedPrewarmWasmVerificationSession).toHaveBeenCalled();
   });
 
   it("fails when frame0 decode does not produce a numeric user id", async () => {
-    mockedDecodeNumericUserIdFromLuma.mockReturnValue(null);
+    mockedDecodeNumericUserIdDiagnosticsFromLuma
+      .mockReturnValueOnce({
+        numericUserId: 444444444,
+        bestScore: 1,
+        bestShift: 0,
+        repsUsed: 4,
+        rightSideLength: 60,
+        validDigits: true,
+      })
+      .mockReturnValueOnce({
+        numericUserId: null,
+        bestScore: Number.POSITIVE_INFINITY,
+        bestShift: 0,
+        repsUsed: 0,
+        rightSideLength: 0,
+        validDigits: false,
+      })
+      .mockReturnValueOnce({
+        numericUserId: null,
+        bestScore: Number.POSITIVE_INFINITY,
+        bestShift: 0,
+        repsUsed: 0,
+        rightSideLength: 0,
+        validDigits: false,
+      });
     const onVerificationComplete = jest.fn();
     const {result} = renderHook(() =>
       useWatermarkVerification(videoRef, "https://example.com/video.mp4", {
