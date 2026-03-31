@@ -43,6 +43,17 @@ let activeUrl: string | null = null;
 let initMeta: {nbSamples: number; width: number; height: number} | null = null;
 let disposeTimer: ReturnType<typeof setTimeout> | null = null;
 
+let sessionEnsureChain: Promise<void> = Promise.resolve();
+
+function enqueueSessionEnsure<T>(fn: () => Promise<T>): Promise<T> {
+  const result = sessionEnsureChain.then(() => fn());
+  sessionEnsureChain = result.then(
+    () => undefined,
+    () => undefined
+  );
+  return result;
+}
+
 function nextId(): number {
   return ++requestSeq;
 }
@@ -101,6 +112,41 @@ function send<T extends OkMsg>(payload: Record<string, unknown>): Promise<T> {
   });
 }
 
+async function runEnsureWasmVerificationSessionLocked(
+  videoUrl: string
+): Promise<{nbSamples: number; width: number; height: number} | null> {
+  if (activeUrl === videoUrl && initMeta) {
+    return initMeta;
+  }
+
+  const applyInitOk = (data: InitOk) => {
+    activeUrl = videoUrl;
+    initMeta = {
+      nbSamples: data.nbSamples,
+      width: data.width,
+      height: data.height,
+    };
+    return initMeta;
+  };
+
+  try {
+    const data = await send<InitOk>({
+      type: "init",
+      videoUrl,
+      baseUrl: baseUrl(),
+    });
+    return applyInitOk(data);
+  } catch {
+    await disposeWasmVerificationSession();
+    const data = await send<InitOk>({
+      type: "init",
+      videoUrl,
+      baseUrl: baseUrl(),
+    });
+    return applyInitOk(data);
+  }
+}
+
 export async function ensureWasmVerificationSession(
   videoUrl: string
 ): Promise<{nbSamples: number; width: number; height: number} | null> {
@@ -111,19 +157,7 @@ export async function ensureWasmVerificationSession(
   if (activeUrl === videoUrl && initMeta) {
     return initMeta;
   }
-  await disposeWasmVerificationSession();
-  const data = await send<InitOk>({
-    type: "init",
-    videoUrl,
-    baseUrl: baseUrl(),
-  });
-  activeUrl = videoUrl;
-  initMeta = {
-    nbSamples: data.nbSamples,
-    width: data.width,
-    height: data.height,
-  };
-  return initMeta;
+  return enqueueSessionEnsure(() => runEnsureWasmVerificationSessionLocked(videoUrl));
 }
 
 export async function prewarmWasmVerificationSession(videoUrl: string): Promise<void> {

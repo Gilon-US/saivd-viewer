@@ -4,6 +4,7 @@ import { FFmpeg } from "@ffmpeg/ffmpeg";
 import { createFile } from "mp4box";
 import type { ISOFile, Movie, MP4BoxBuffer, Sample } from "mp4box";
 import { extractYLumaFromYuv420pRaw } from "./yuv420-luma-extract";
+import { getFfmpegCoreUrls } from "./ffmpeg-verification-assets";
 
 const RANGE_STEPS_BYTES = [8 * 1024 * 1024, 16 * 1024 * 1024, 32 * 1024 * 1024];
 
@@ -174,9 +175,7 @@ async function ensureMoovParsed(url: string, signal: AbortSignal): Promise<Movie
 async function ensureFfmpegLoaded(base: string): Promise<FFmpeg> {
   if (ffmpeg?.loaded) return ffmpeg;
   const ff = new FFmpeg();
-  const origin = base.replace(/\/$/, "");
-  const coreURL = `${origin}/ffmpeg/ffmpeg-core.js`;
-  const wasmURL = `${origin}/ffmpeg/ffmpeg-core.wasm`;
+  const {coreURL, wasmURL} = getFfmpegCoreUrls(base.replace(/\/$/, ""));
   await ff.load({coreURL, wasmURL});
   ffmpeg = ff;
   return ff;
@@ -264,25 +263,29 @@ async function decodeFrameToY(frameIndex: number, signal: AbortSignal): Promise<
   return {yPlane, width: videoWidth, height: videoHeight};
 }
 
-function resetSession() {
-  try {
-    ffmpeg?.terminate();
-  } catch {
-    // ignore
-  }
-  ffmpeg = null;
-  mp4boxfile = null;
-  videoUrl = "";
-  videoTrackId = 0;
-  videoWidth = 0;
-  videoHeight = 0;
-  nbSamples = 0;
+function resetDemuxSession() {
   try {
     abortController?.abort();
   } catch {
     // ignore
   }
   abortController = null;
+  mp4boxfile = null;
+  videoUrl = "";
+  videoTrackId = 0;
+  videoWidth = 0;
+  videoHeight = 0;
+  nbSamples = 0;
+}
+
+function disposeFfmpegAndDemux() {
+  try {
+    ffmpeg?.terminate();
+  } catch {
+    // ignore
+  }
+  ffmpeg = null;
+  resetDemuxSession();
 }
 
 self.onmessage = async (ev: MessageEvent<WorkerRequest>) => {
@@ -290,20 +293,24 @@ self.onmessage = async (ev: MessageEvent<WorkerRequest>) => {
 
   try {
     if (msg.type === "dispose") {
-      resetSession();
+      disposeFfmpegAndDemux();
       const r: WorkerResponse = {id: msg.id, ok: true, type: "dispose"};
       self.postMessage(r);
       return;
     }
 
     if (msg.type === "init") {
-      resetSession();
+      resetDemuxSession();
       videoUrl = msg.videoUrl;
       baseUrlForFfmpeg = msg.baseUrl.replace(/\/$/, "");
       abortController = new AbortController();
       const signal = abortController.signal;
 
-      const info = await ensureMoovParsed(msg.videoUrl, signal);
+      const [info] = await Promise.all([
+        ensureMoovParsed(msg.videoUrl, signal),
+        ensureFfmpegLoaded(baseUrlForFfmpeg),
+      ]);
+
       const vTrack = info.videoTracks?.[0];
       if (!vTrack) {
         throw new Error("No video track in MP4");

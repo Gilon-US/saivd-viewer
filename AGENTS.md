@@ -12,6 +12,8 @@ Context and instructions for AI coding assistants working on this codebase.
 - **Stack**: Next.js 16 (App Router), React 19, TypeScript, Tailwind CSS, Supabase (Auth + PostgreSQL), Wasabi (S3-compatible storage).
 - **Deployment**: Netlify (Node 20), Docker optional.
 
+**Video format (frame-0 verification):** The SAVD backend **normalizes source videos to faststart MP4** (`moov` at start) before watermarking. This matches the viewer assumption elsewhere in this doc (**faststart MP4 only**): it **reduces demux/moov latency** before the first decode. It does **not** eliminate WASM/codec startup or high-resolution decode cost on slow devices.
+
 ---
 
 ## 2. Repository Structure
