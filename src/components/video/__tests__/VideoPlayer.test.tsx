@@ -140,6 +140,18 @@ describe('VideoPlayer', () => {
     expect(screen.getByText(/not authentic|viewing not allowed/i)).toBeInTheDocument();
   });
 
+  it('shows staged verification overlay copy while verifying', () => {
+    render(
+      <VideoPlayer
+        {...defaultProps}
+        enableFrameAnalysis
+        videoId="vid-2"
+        verificationStatus="verifying"
+      />
+    );
+    expect(screen.getByText(/Verifying authenticity|Preparing secure verification/i)).toBeInTheDocument();
+  });
+
   it('has proper accessibility attributes', () => {
     render(<VideoPlayer {...defaultProps} />);
     expect(screen.getByLabelText('Close video player')).toBeInTheDocument();
