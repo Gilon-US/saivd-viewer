@@ -2,16 +2,22 @@
 
 > V2 update: current strategy is documented in `docs/V2_WATERMARK_STRATEGY.md` and uses marker-aware bootstrap plus every-10th-frame runtime verification.
 
-This document describes the **end‑to‑end implementation strategy** for:
+This document describes the end-to-end implementation strategy for:
 
 - Decoding the embedded `numeric_user_id` from a watermarked video frame in the browser.
-- Fetching the creator’s **public RSA key** from this SAVD app.
-- Verifying the watermark using the public RSA key (optional but recommended).
+- Fetching the creator public RSA key from SAIVD public API.
+- Verifying the watermark with that public key.
 
-It is intended as **context for coding AIs** and developers working on:
+It is intended as context for coding AIs and developers working on:
 
-- This SAVD Next.js application.
-- **Third‑party Next.js applications** that need to verify the same watermarked videos.
+- This SAIVD Viewer Next.js application.
+- Third-party Next.js applications that need to verify the same watermarked videos.
+
+## Current implementation note
+
+- This viewer uses WebCodecs/WASM Y-plane capture for verification.
+- Canvas-based extraction sections in this guide are retained for algorithm context only.
+- For live behavior and policy, treat `V2_WATERMARK_STRATEGY.md` as authoritative.
 
 > **Key point for third‑party apps:**  
 > Third‑party apps **do not** need their own key store. They should:

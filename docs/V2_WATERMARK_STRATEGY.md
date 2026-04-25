@@ -1,6 +1,7 @@
 # V2 Watermark Strategy (saivd-viewer)
 
 `saivd-viewer` verifies watermark authenticity entirely in-browser using V2.
+The public key and profile/QR APIs are fetched from `NEXT_PUBLIC_SAIVD_API_URL` (default `https://saivd.netlify.app`).
 
 ## Bootstrap
 

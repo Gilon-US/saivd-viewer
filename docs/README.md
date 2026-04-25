@@ -12,8 +12,6 @@ This folder contains technical and implementation documentation for `saivd-viewe
   Integration guidance for third-party Next.js apps consuming viewer verification behavior.
 - `WATERMARK_DATA_AND_DECODING_GUIDE.md`  
   Watermark payload and decoding reference used by frontend verification code.
-- `video-player-implementation-guide.md`  
-  Viewer player implementation details.
 - `video-playback-fix.md`  
   Playback-specific troubleshooting/fix notes.
 - `thumbnail-generation-implementation.md`  

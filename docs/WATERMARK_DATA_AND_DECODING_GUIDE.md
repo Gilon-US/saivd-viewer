@@ -161,5 +161,6 @@ If verification succeeds, the frame’s watermark is valid for that user. You ca
 
 ## 10. Related docs
 
-- **Frame layout and verification details:** `docs/FRONTEND_WATERMARK_VERIFICATION_SPEC.md`.
-- **9-digit decode and luma:** `docs/FRONTEND_USER_ID_DECODE_UPDATE.md`, `docs/FRONTEND_WATERMARK_VERIFICATION_FIX.md`.
+- `FRONTEND_WATERMARK_VERIFICATION_IMPLEMENTATION_GUIDE.md`
+- `V2_WATERMARK_STRATEGY.md`
+- `THIRD_PARTY_NEXTJS_APP_IMPLEMENTATION_GUIDE.md`
