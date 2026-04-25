@@ -5,6 +5,7 @@ A **viewer/player** application for uploading, viewing, and verifying watermarke
 ## V2 Watermark Verification
 
 This viewer follows the V2 in-browser strategy. See `docs/V2_WATERMARK_STRATEGY.md` for bootstrap and every-10th-frame verification behavior.
+For the full current docs set, start at `docs/README.md`.
 
 ## Purpose
 
@@ -138,7 +139,7 @@ The default configuration allows:
 - **Upload method**: Pre-signed POST URLs
 - **Expiry**: 1 hour per upload URL
 
-You can modify these settings in `src/components/FileUploader.tsx` and `src/app/api/upload/route.ts`.
+You can modify these settings in `src/components/FileUploader.tsx` and `src/app/api/videos/upload/route.ts`.
 
 ## Project Structure
 
