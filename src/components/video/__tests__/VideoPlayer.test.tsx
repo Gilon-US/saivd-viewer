@@ -56,7 +56,7 @@ describe('VideoPlayer', () => {
     expect(video).toHaveAttribute('src', defaultProps.videoUrl);
   });
 
-  it('withholds video src when enableFrameAnalysis and verification not yet verified', () => {
+  it('keeps video src attached while verification is in progress', () => {
     render(
       <VideoPlayer
         {...defaultProps}
@@ -65,7 +65,7 @@ describe('VideoPlayer', () => {
       />
     );
     const video = document.querySelector('video');
-    expect(video).not.toHaveAttribute('src');
+    expect(video).toHaveAttribute('src', defaultProps.videoUrl);
   });
 
   it('sets video src when verificationStatus is verified', () => {
@@ -90,7 +90,7 @@ describe('VideoPlayer', () => {
     expect(mockOnClose).toHaveBeenCalledTimes(1);
   });
 
-  it('play/pause controls only visible when playback allowed (verified or null status)', () => {
+  it('play/pause controls remain visible while verification is in progress', () => {
     render(
       <VideoPlayer
         {...defaultProps}
@@ -99,7 +99,7 @@ describe('VideoPlayer', () => {
         verificationStatus="verifying"
       />
     );
-    expect(screen.queryByLabelText('Play')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Play')).toBeInTheDocument();
   });
 
   it('play/pause controls visible when verificationStatus is verified', () => {
@@ -138,6 +138,31 @@ describe('VideoPlayer', () => {
       />
     );
     expect(screen.getByText(/not authentic|viewing not allowed/i)).toBeInTheDocument();
+    expect(screen.queryByLabelText('Play')).not.toBeInTheDocument();
+  });
+
+  it('shows creator profile QR button only after verified identity is available', () => {
+    const { rerender } = render(
+      <VideoPlayer
+        {...defaultProps}
+        enableFrameAnalysis
+        verificationStatus="verifying"
+        verifiedUserId={null}
+      />
+    );
+
+    expect(screen.queryByLabelText('View creator profile')).not.toBeInTheDocument();
+
+    rerender(
+      <VideoPlayer
+        {...defaultProps}
+        enableFrameAnalysis
+        verificationStatus="verified"
+        verifiedUserId="123"
+      />
+    );
+
+    expect(screen.getByLabelText('View creator profile')).toBeInTheDocument();
   });
 
   it('shows staged verification overlay copy while verifying', () => {
