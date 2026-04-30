@@ -53,6 +53,7 @@ export async function updateSession(request: NextRequest) {
     !pathname.startsWith("/api/health") &&
     !pathname.startsWith("/api/auth") &&
     !pathname.startsWith("/api/auth-test") &&
+    !pathname.startsWith("/api/public/") && // Public, unauthenticated endpoints (e.g. share-by-link)
     !pathname.startsWith("/api/videos/upload") && // Allow upload endpoint (handles its own auth)
     !pathname.startsWith("/api/callbacks");
 

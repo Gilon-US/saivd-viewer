@@ -1,7 +1,7 @@
 "use client";
 import {Card, CardContent} from "@/components/ui/card";
 import {Button} from "@/components/ui/button";
-import {UploadIcon, RefreshCwIcon, TrashIcon} from "lucide-react";
+import {UploadIcon, RefreshCwIcon, TrashIcon, LinkIcon} from "lucide-react";
 import Image from "next/image";
 import {useToast} from "@/hooks/useToast";
 import {LoadingSpinner} from "@/components/ui/loading-spinner";
@@ -112,6 +112,48 @@ export function VideoGrid({videos, isLoading, error, onRefresh, onOpenUploadModa
       verifiedUserId: null,
     });
   };
+
+  const handleCopyLink = useCallback(
+    async (video: Video) => {
+      const origin =
+        typeof window !== "undefined" && window.location?.origin ? window.location.origin : "";
+      const shareUrl = `${origin}/v/${video.id}`;
+
+      try {
+        if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+          await navigator.clipboard.writeText(shareUrl);
+        } else {
+          // Fallback for older browsers / non-secure contexts (HTTP).
+          const textarea = document.createElement("textarea");
+          textarea.value = shareUrl;
+          textarea.setAttribute("readonly", "");
+          textarea.style.position = "absolute";
+          textarea.style.left = "-9999px";
+          document.body.appendChild(textarea);
+          textarea.select();
+          document.execCommand("copy");
+          document.body.removeChild(textarea);
+        }
+
+        toast({
+          title: "Public link copied",
+          description: shareUrl,
+          variant: "success",
+        });
+      } catch (err) {
+        console.error("Failed to copy public link:", err);
+        toast({
+          title: "Couldn't copy link",
+          description:
+            err instanceof Error
+              ? err.message
+              : "Your browser blocked copying. Long-press the video to share manually.",
+          variant: "error",
+        });
+      }
+    },
+    [toast]
+  );
 
   const handleDeleteClick = (video: Video) => {
     setDeleteDialog({
@@ -229,14 +271,25 @@ export function VideoGrid({videos, isLoading, error, onRefresh, onOpenUploadModa
                     Uploaded {new Date(video.upload_date).toLocaleDateString()}
                   </p>
                 </div>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-8 w-8 text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 flex-shrink-0"
-                  onClick={() => handleDeleteClick(video)}
-                  title={`Delete "${video.filename}"`}>
-                  <TrashIcon className="h-4 w-4" />
-                </Button>
+                <div className="flex items-center gap-1 flex-shrink-0">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 text-gray-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/20"
+                    onClick={() => handleCopyLink(video)}
+                    title={`Copy public link to "${video.filename}"`}
+                    aria-label={`Copy public link to ${video.filename}`}>
+                    <LinkIcon className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20"
+                    onClick={() => handleDeleteClick(video)}
+                    title={`Delete "${video.filename}"`}>
+                    <TrashIcon className="h-4 w-4" />
+                  </Button>
+                </div>
               </div>
 
               {/* Video thumbnail */}

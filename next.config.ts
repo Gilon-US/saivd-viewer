@@ -1,8 +1,24 @@
 import type { NextConfig } from "next";
 import path from "node:path";
 
+/**
+ * Local dev opt-out for React Strict Mode. The watermark verification hook uses
+ * persistent refs (`verificationStartedRef`, `verificationSessionKeyRef`,
+ * `prewarmStartedRef`) to dedupe work; under dev-mode Strict Mode, components
+ * mount → unmount → remount on initial mount, the cleanup sets `mounted = false`
+ * in the in-flight `runVerification` closure, and the remount short-circuits via
+ * the ref guards — so verification gets stuck on "Checking watermark on frame 0"
+ * forever. Strict Mode's double-mount is dev-only, so production / cloud builds
+ * are unaffected either way.
+ *
+ * Run dev with `NEXT_DISABLE_STRICT_MODE=1 npm run dev:webpack` when iterating
+ * on watermark playback locally. Mirrors the creator app's pattern.
+ */
+const strictModeDisabledForSession = process.env.NEXT_DISABLE_STRICT_MODE === "1";
+
 const nextConfig: NextConfig = {
   ...(process.env.USE_STANDALONE_OUTPUT === "true" ? { output: "standalone" as const } : {}),
+  reactStrictMode: !strictModeDisabledForSession,
   transpilePackages: ["@ffmpeg/ffmpeg", "@ffmpeg/util", "mp4box"],
   experimental: {
     // Add any experimental features here
