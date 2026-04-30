@@ -82,6 +82,7 @@ src/
 | Command | Description |
 |---------|-------------|
 | `npm run dev` | Start dev server (Turbopack) |
+| `npm run dev:webpack` | Start dev server with webpack (use this for ffmpeg/worker verification paths) |
 | `npm run build` | Production build |
 | `npm run start` | Run production server |
 | `npm test` | Run Jest tests |

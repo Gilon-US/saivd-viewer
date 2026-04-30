@@ -103,6 +103,12 @@ Watermarking and creator-specific features (e.g. starting watermark jobs, queue 
    npm run dev
    ```
 
+   For watermark verification flows that use `@ffmpeg/ffmpeg` workers, use webpack dev mode:
+
+   ```bash
+   npm run dev:webpack
+   ```
+
 6. Open [http://localhost:3000](http://localhost:3000) in your browser.
 
 ## Wasabi Setup
