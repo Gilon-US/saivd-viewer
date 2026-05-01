@@ -15,7 +15,8 @@ import {useVideoUpload} from "@/hooks/useVideoUpload";
  * Workflow:
  *   1. User opens https://viewer.saivd.io/claim/<token> (link they got from a creator).
  *   2. We require viewer auth (redirect to /login if not signed in, with a redirect-back).
- *   3. Fetch transfer metadata from the creator app: GET ${SAIVD_API_ORIGIN}/api/public/transfers/<token>.
+ *   3. Fetch transfer metadata via same-origin proxy: GET /api/claim/transfers/<token>
+ *      (server forwards to the creator app's public transfers API — avoids CORS).
  *   4. Show file info + a "Claim" button.
  *   5. On Claim:
  *        a. fetch(download_url) → Blob → File. (CORS-protected GET to creator's bucket.)
@@ -23,17 +24,14 @@ import {useVideoUpload} from "@/hooks/useVideoUpload";
  *           backs the dashboard's drag-and-drop upload. The viewer's bucket gets a
  *           fresh object key, the videos table gets a fresh UUID, the watermark
  *           verification path is identical.
- *        c. After useVideoUpload reports success, POST to creator's mark-claimed
- *           endpoint to invalidate the token.
+ *        c. After useVideoUpload reports success, POST /api/claim/transfers/<token>/mark-claimed
+ *           (proxy) to invalidate the token on the creator app.
  *        d. Redirect to /dashboard/videos.
  *
  * The token never touches the viewer's database. The viewer never holds creator
  * DB credentials. All cross-app communication is HTTPS to creator's public,
  * token-protected endpoints.
  */
-
-const SAIVD_API_ORIGIN =
-  (process.env.NEXT_PUBLIC_SAIVD_API_URL ?? "https://saivd.netlify.app").replace(/\/+$/, "");
 
 type TransferMetadata = {
   filename: string;
@@ -85,8 +83,8 @@ export default function ClaimPage({params}: {params: Promise<{token: string}>}) 
 
     const load = async () => {
       try {
-        const res = await fetch(`${SAIVD_API_ORIGIN}/api/public/transfers/${token}`, {
-          credentials: "omit",
+        const res = await fetch(`/api/claim/transfers/${encodeURIComponent(token)}`, {
+          credentials: "same-origin",
         });
         const body = await res.json().catch(() => null);
         if (cancelled) return;
@@ -185,9 +183,9 @@ export default function ClaimPage({params}: {params: Promise<{token: string}>}) 
       //    creator's row will still expire on TTL.
       setClaimStatus("finalizing");
       try {
-        await fetch(`${SAIVD_API_ORIGIN}/api/public/transfers/${token}/mark-claimed`, {
+        await fetch(`/api/claim/transfers/${encodeURIComponent(token)}/mark-claimed`, {
           method: "POST",
-          credentials: "omit",
+          credentials: "same-origin",
         });
       } catch {
         /* non-fatal */
