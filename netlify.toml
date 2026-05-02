@@ -13,6 +13,9 @@
   for = "/embed/*"
   [headers.values]
     Content-Security-Policy = "frame-ancestors *"
+    # Some builders fetch the embed URL from their origin to validate previews.
+    Access-Control-Allow-Origin = "*"
+    Access-Control-Allow-Methods = "GET, HEAD, OPTIONS"
 
 # Forbid /v/* from being framed — force embedders to use /embed/* instead.
 # This is a control point for future analytics, rate-limiting, and per-customer
@@ -31,3 +34,15 @@
     Access-Control-Allow-Origin = "*"
     Access-Control-Allow-Methods = "GET, OPTIONS"
     Cache-Control = "public, s-maxage=3600, max-age=3600"
+
+# Public video API must be cross-origin readable. Builder products (Hostinger
+# Website Builder, Wix, Squarespace) wrap user-embedded iframes in ways that
+# can make the iframe's same-origin fetch behave as cross-origin from the
+# browser's perspective, causing fetch() to throw "Failed to fetch" without
+# CORS headers. The endpoint is already public (no auth) so this doesn't
+# change the security posture — see security note in EMBED_COMPLETE_SPEC.md.
+[[headers]]
+  for = "/api/public/*"
+  [headers.values]
+    Access-Control-Allow-Origin = "*"
+    Access-Control-Allow-Methods = "GET, OPTIONS"
