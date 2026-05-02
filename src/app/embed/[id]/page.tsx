@@ -1,0 +1,130 @@
+"use client";
+
+import {use, useCallback, useEffect, useRef, useState} from "react";
+import {VideoPlayer} from "@/components/video/VideoPlayer";
+import {LoadingSpinner} from "@/components/ui/loading-spinner";
+import {AlertTriangleIcon} from "lucide-react";
+
+type FetchStatus = "loading" | "ready" | "not_found" | "fetch_error";
+type VerificationStatus = "verifying" | "verified" | "failed" | null;
+
+/**
+ * Embeddable video viewer at /embed/[id]. Designed for iframe use on third-party
+ * sites. Reuses the same VideoPlayer + verification pipeline as /v/[id], but
+ * with no modal chrome, no replay card, and no fullscreen overlay.
+ *
+ * Sizing: fills its parent (the iframe). Embedders are responsible for sizing
+ * the iframe itself (the share-UI snippet defaults to a responsive 16:9 box).
+ */
+export default function EmbedVideoPage({params}: {params: Promise<{id: string}>}) {
+  const {id: videoId} = use(params);
+
+  const [fetchStatus, setFetchStatus] = useState<FetchStatus>("loading");
+  const [fetchError, setFetchError] = useState<string | null>(null);
+  const [playbackUrl, setPlaybackUrl] = useState<string | null>(null);
+  const [verificationStatus, setVerificationStatus] = useState<VerificationStatus>(null);
+  const [verifiedUserId, setVerifiedUserId] = useState<string | null>(null);
+
+  const fetchInflightRef = useRef(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (fetchInflightRef.current) return;
+    fetchInflightRef.current = true;
+
+    const load = async () => {
+      try {
+        const res = await fetch(`/api/public/videos/${videoId}/play?variant=watermarked`);
+        const body = await res.json().catch(() => null);
+
+        if (cancelled) return;
+
+        if (res.status === 404) {
+          setFetchStatus("not_found");
+          return;
+        }
+
+        if (!res.ok || !body?.success || !body?.data?.playbackUrl) {
+          setFetchError(body?.error?.message ?? `Failed to load video (status ${res.status})`);
+          setFetchStatus("fetch_error");
+          return;
+        }
+
+        setPlaybackUrl(body.data.playbackUrl);
+        setVerificationStatus("verifying");
+        setVerifiedUserId(null);
+        setFetchStatus("ready");
+      } catch (err) {
+        if (cancelled) return;
+        setFetchError(err instanceof Error ? err.message : "Failed to load video");
+        setFetchStatus("fetch_error");
+      } finally {
+        fetchInflightRef.current = false;
+      }
+    };
+
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, [videoId]);
+
+  const handleVerificationComplete = useCallback(
+    (status: "verified" | "failed", userId: string | null) => {
+      setVerificationStatus(status);
+      setVerifiedUserId(userId);
+    },
+    []
+  );
+
+  const noop = useCallback(() => {}, []);
+
+  if (fetchStatus === "loading") {
+    return (
+      <main className="flex h-screen w-screen items-center justify-center bg-black">
+        <LoadingSpinner size="lg" />
+      </main>
+    );
+  }
+
+  if (fetchStatus === "not_found") {
+    return (
+      <main className="flex h-screen w-screen items-center justify-center bg-black px-4">
+        <div className="text-center">
+          <AlertTriangleIcon className="mx-auto mb-3 h-8 w-8 text-yellow-400" />
+          <p className="text-sm text-white/80">Video not found.</p>
+        </div>
+      </main>
+    );
+  }
+
+  if (fetchStatus === "fetch_error") {
+    return (
+      <main className="flex h-screen w-screen items-center justify-center bg-black px-4">
+        <div className="text-center">
+          <AlertTriangleIcon className="mx-auto mb-3 h-8 w-8 text-red-400" />
+          <p className="text-sm text-white/80">{fetchError ?? "Couldn't load this video."}</p>
+        </div>
+      </main>
+    );
+  }
+
+  // ready
+  return (
+    <main className="h-screen w-screen bg-black">
+      {playbackUrl && (
+        <VideoPlayer
+          embedded
+          videoUrl={playbackUrl}
+          videoId={videoId}
+          isOpen
+          onClose={noop}
+          enableFrameAnalysis
+          verificationStatus={verificationStatus}
+          verifiedUserId={verifiedUserId}
+          onVerificationComplete={handleVerificationComplete}
+        />
+      )}
+    </main>
+  );
+}

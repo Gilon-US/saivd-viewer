@@ -18,6 +18,8 @@ interface VideoPlayerProps {
   verificationStatus?: "verifying" | "verified" | "failed" | null;
   verifiedUserId?: string | null;
   onVerificationComplete?: (status: "verified" | "failed", userId: string | null) => void;
+  /** When true, render inline (fills parent) and hide the modal close button. Used by /embed/[id]. */
+  embedded?: boolean;
 }
 
 export function VideoPlayer({
@@ -29,7 +31,9 @@ export function VideoPlayer({
   verificationStatus,
   verifiedUserId,
   onVerificationComplete,
+  embedded = false,
 }: VideoPlayerProps) {
+  void videoId;
   const videoRef = useRef<HTMLVideoElement>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
@@ -173,15 +177,21 @@ export function VideoPlayer({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-2 sm:p-4">
-      <div className="relative w-full max-w-5xl">
-        {/* Close button */}
-        <button
-          onClick={onClose}
-          className="absolute -top-10 sm:-top-12 right-0 sm:right-2 text-white hover:text-gray-300 transition-colors touch-manipulation z-30"
-          aria-label="Close video player">
-          <X className="w-6 h-6 sm:w-8 sm:h-8" />
-        </button>
+    <div
+      className={
+        embedded
+          ? "relative w-full h-full bg-black"
+          : "fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-2 sm:p-4"
+      }>
+      <div className={embedded ? "relative w-full h-full" : "relative w-full max-w-5xl"}>
+        {!embedded && (
+          <button
+            onClick={onClose}
+            className="absolute -top-10 sm:-top-12 right-0 sm:right-2 text-white hover:text-gray-300 transition-colors touch-manipulation z-30"
+            aria-label="Close video player">
+            <X className="w-6 h-6 sm:w-8 sm:h-8" />
+          </button>
+        )}
 
         {/* Video container */}
         <div className="relative bg-black rounded-lg overflow-hidden">
@@ -230,7 +240,7 @@ export function VideoPlayer({
               type="button"
               onClick={() => {
                 if (creatorProfileUrl) {
-                  window.location.assign(creatorProfileUrl);
+                  window.open(creatorProfileUrl, "_blank", "noopener,noreferrer");
                 }
               }}
               disabled={!creatorProfileUrl}

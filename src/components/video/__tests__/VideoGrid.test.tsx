@@ -1,13 +1,15 @@
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import '@testing-library/jest-dom';
-import { VideoGrid, Video } from '../VideoGrid';
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
+import "@testing-library/jest-dom";
+import { VideoGrid, Video } from "../VideoGrid";
 
-// Mock the useToast hook
-jest.mock('@/hooks/useToast', () => ({
-  useToast: jest.fn(() => ({
-    toast: jest.fn(),
-  })),
-}));
+// Stable toast mock so tests can assert on calls (e.g. delete failure).
+// `var` so the jest.mock factory can assign before initialization (Jest hoisting).
+// eslint-disable-next-line no-var
+var toastFn: jest.Mock;
+jest.mock("@/hooks/useToast", () => {
+  toastFn = jest.fn();
+  return { useToast: () => ({ toast: toastFn }) };
+});
 
 // Mock next/image
 jest.mock('next/image', () => ({
@@ -117,11 +119,10 @@ describe('VideoGrid', () => {
     expect(mockProps.onRefresh).toHaveBeenCalled();
   });
 
-  describe('Delete functionality', () => {
+  describe("Delete functionality", () => {
     beforeEach(() => {
-      // Reset all mocks before each test
       jest.clearAllMocks();
-      // Mock fetch globally
+      toastFn.mockClear();
       global.fetch = jest.fn();
     });
 
@@ -144,9 +145,11 @@ describe('VideoGrid', () => {
       const deleteButton = screen.getByTitle('Delete "test-video.mp4"');
       fireEvent.click(deleteButton);
       
-      expect(screen.getByText('Delete Video')).toBeInTheDocument();
-      expect(screen.getByText('Are you sure you want to delete this video?')).toBeInTheDocument();
-      expect(screen.getByText(/test-video\.mp4/)).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "Delete Video" })).toBeInTheDocument();
+      expect(screen.getByText("Are you sure you want to delete this video?")).toBeInTheDocument();
+      const dialogPanel = screen.getByRole("heading", { name: "Delete Video" }).closest(".max-w-md");
+      expect(dialogPanel).toBeTruthy();
+      expect(within(dialogPanel as HTMLElement).getByText(/test-video\.mp4/)).toBeInTheDocument();
     });
 
     it('closes confirmation dialog when cancel is clicked', () => {
@@ -160,7 +163,7 @@ describe('VideoGrid', () => {
       const cancelButton = screen.getByText('Cancel');
       fireEvent.click(cancelButton);
       
-      expect(screen.queryByText('Delete Video')).not.toBeInTheDocument();
+      expect(screen.queryByRole('heading', { name: 'Delete Video' })).not.toBeInTheDocument();
     });
 
     it('calls delete API and refreshes grid on successful deletion', async () => {
@@ -179,8 +182,8 @@ describe('VideoGrid', () => {
       const deleteButton = screen.getByTitle('Delete "test-video.mp4"');
       fireEvent.click(deleteButton);
       
-      // Confirm deletion
-      const confirmButton = screen.getByText('Delete Video');
+      // Confirm deletion (heading also says "Delete Video")
+      const confirmButton = screen.getByRole('button', { name: 'Delete Video' });
       fireEvent.click(confirmButton);
       
       await waitFor(() => {
@@ -191,37 +194,29 @@ describe('VideoGrid', () => {
       });
     });
 
-    it('shows error message on failed deletion', async () => {
+    it("shows error message on failed deletion", async () => {
       const mockFetch = global.fetch as jest.MockedFunction<typeof fetch>;
       mockFetch.mockResolvedValueOnce({
         ok: false,
         json: async () => ({
           success: false,
-          error: { message: 'Failed to delete video' }
+          error: { message: "Failed to delete video" },
         }),
       } as Response);
 
-      const mockToast = jest.fn();
-      // Mock the useToast hook for this specific test
-      jest.doMock('@/hooks/useToast', () => ({
-        useToast: () => ({ toast: mockToast }),
-      }));
-
       render(<VideoGrid {...mockProps} />);
-      
-      // Open dialog
+
       const deleteButton = screen.getByTitle('Delete "test-video.mp4"');
       fireEvent.click(deleteButton);
-      
-      // Confirm deletion
-      const confirmButton = screen.getByText('Delete Video');
+
+      const confirmButton = screen.getByRole("button", { name: "Delete Video" });
       fireEvent.click(confirmButton);
-      
+
       await waitFor(() => {
-        expect(mockToast).toHaveBeenCalledWith({
-          title: 'Delete failed',
-          description: 'Failed to delete video',
-          variant: 'error',
+        expect(toastFn).toHaveBeenCalledWith({
+          title: "Delete failed",
+          description: "Failed to delete video",
+          variant: "error",
         });
       });
     });
@@ -242,8 +237,8 @@ describe('VideoGrid', () => {
       const deleteButton = screen.getByTitle('Delete "test-video.mp4"');
       fireEvent.click(deleteButton);
       
-      // Confirm deletion
-      const confirmButton = screen.getByText('Delete Video');
+      // Confirm deletion (heading also says "Delete Video")
+      const confirmButton = screen.getByRole('button', { name: 'Delete Video' });
       fireEvent.click(confirmButton);
       
       // Check that buttons are disabled during deletion

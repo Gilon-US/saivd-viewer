@@ -1,6 +1,12 @@
 "use client";
 import {Card, CardContent} from "@/components/ui/card";
 import {Button} from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {UploadIcon, RefreshCwIcon, TrashIcon, LinkIcon} from "lucide-react";
 import Image from "next/image";
 import {useToast} from "@/hooks/useToast";
@@ -117,15 +123,15 @@ export function VideoGrid({videos, isLoading, error, onRefresh, onOpenUploadModa
     async (video: Video) => {
       const origin =
         typeof window !== "undefined" && window.location?.origin ? window.location.origin : "";
-      const shareUrl = `${origin}/v/${video.id}`;
+      const copyUrl = `${origin}/v/${video.id}`;
 
       try {
         if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
-          await navigator.clipboard.writeText(shareUrl);
+          await navigator.clipboard.writeText(copyUrl);
         } else {
           // Fallback for older browsers / non-secure contexts (HTTP).
           const textarea = document.createElement("textarea");
-          textarea.value = shareUrl;
+          textarea.value = copyUrl;
           textarea.setAttribute("readonly", "");
           textarea.style.position = "absolute";
           textarea.style.left = "-9999px";
@@ -136,8 +142,8 @@ export function VideoGrid({videos, isLoading, error, onRefresh, onOpenUploadModa
         }
 
         toast({
-          title: "Public link copied",
-          description: shareUrl,
+          title: "Link copied",
+          description: copyUrl,
           variant: "success",
         });
       } catch (err) {
@@ -148,6 +154,53 @@ export function VideoGrid({videos, isLoading, error, onRefresh, onOpenUploadModa
             err instanceof Error
               ? err.message
               : "Your browser blocked copying. Long-press the video to share manually.",
+          variant: "error",
+        });
+      }
+    },
+    [toast]
+  );
+
+  const handleCopyEmbed = useCallback(
+    async (videoId: string) => {
+      const origin =
+        typeof window !== "undefined" && window.location?.origin ? window.location.origin : "";
+      const embedUrl = `${origin}/embed/${videoId}`;
+      const snippet =
+        `<iframe src="${embedUrl}"\n` +
+        `        width="100%" height="400"\n` +
+        `        style="width:100%;aspect-ratio:16/9;border:0;display:block;"\n` +
+        `        allow="autoplay; fullscreen; picture-in-picture"\n` +
+        `        allowfullscreen loading="lazy"\n` +
+        `        referrerpolicy="strict-origin-when-cross-origin"\n` +
+        `        title="SAIVD verified video"></iframe>`;
+
+      try {
+        if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+          await navigator.clipboard.writeText(snippet);
+        } else {
+          const ta = document.createElement("textarea");
+          ta.value = snippet;
+          ta.style.position = "fixed";
+          ta.style.opacity = "0";
+          document.body.appendChild(ta);
+          ta.select();
+          document.execCommand("copy");
+          document.body.removeChild(ta);
+        }
+        toast({
+          title: "Embed code copied",
+          description: "Paste it into your site's HTML.",
+          variant: "success",
+        });
+      } catch (err) {
+        console.error("Failed to copy embed code:", err);
+        toast({
+          title: "Couldn't copy embed code",
+          description:
+            err instanceof Error
+              ? err.message
+              : "Your browser blocked copying. Try selecting and copying manually.",
           variant: "error",
         });
       }
@@ -272,15 +325,26 @@ export function VideoGrid({videos, isLoading, error, onRefresh, onOpenUploadModa
                   </p>
                 </div>
                 <div className="flex items-center gap-1 flex-shrink-0">
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8 text-gray-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/20"
-                    onClick={() => handleCopyLink(video)}
-                    title={`Copy public link to "${video.filename}"`}
-                    aria-label={`Copy public link to ${video.filename}`}>
-                    <LinkIcon className="h-4 w-4" />
-                  </Button>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 text-gray-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/20"
+                        title={`Share "${video.filename}"`}
+                        aria-label="Share video">
+                        <LinkIcon className="h-4 w-4" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem onClick={() => void handleCopyLink(video)}>
+                        Copy share link
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => void handleCopyEmbed(video.id)}>
+                        Copy embed code
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                   <Button
                     variant="ghost"
                     size="icon"

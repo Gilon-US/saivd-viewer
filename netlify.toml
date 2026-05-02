@@ -5,13 +5,29 @@
 [build.environment]
   NODE_VERSION = "20"
   AWS_LAMBDA_JS_RUNTIME = "nodejs20.x"
-  # Configure secrets scanning via environment variables
-  # These must be set as environment variables in Netlify UI, not in this file
   SECRETS_SCAN_OMIT_KEYS = "NEXT_PUBLIC_SUPABASE_URL,NEXT_PUBLIC_SUPABASE_ANON_KEY,NEXT_PUBLIC_APP_URL,WASABI_REGION,WASABI_BUCKET_NAME"
   SECRETS_SCAN_OMIT_PATHS = ".next/**,.netlify/**,node_modules/**,docs/**,*.md"
 
-# Redirect rules (if needed)
-[[redirects]]
-  from = "/*"
-  to = "/index.html"
-  status = 200
+# Allow /embed/* to be framed by any site (these URLs exist for that purpose).
+[[headers]]
+  for = "/embed/*"
+  [headers.values]
+    Content-Security-Policy = "frame-ancestors *"
+
+# Forbid /v/* from being framed — force embedders to use /embed/* instead.
+# This is a control point for future analytics, rate-limiting, and per-customer
+# allowlisting without breaking embedded use cases.
+[[headers]]
+  for = "/v/*"
+  [headers.values]
+    X-Frame-Options = "DENY"
+    Content-Security-Policy = "frame-ancestors 'none'"
+
+# oEmbed endpoint must be cross-origin readable (consumed by WordPress, Notion,
+# Slack, Discord etc. from their own infrastructure).
+[[headers]]
+  for = "/api/oembed"
+  [headers.values]
+    Access-Control-Allow-Origin = "*"
+    Access-Control-Allow-Methods = "GET, OPTIONS"
+    Cache-Control = "public, s-maxage=3600, max-age=3600"
