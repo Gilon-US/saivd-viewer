@@ -20,6 +20,30 @@ const nextConfig: NextConfig = {
   ...(process.env.USE_STANDALONE_OUTPUT === "true" ? { output: "standalone" as const } : {}),
   reactStrictMode: !strictModeDisabledForSession,
   transpilePackages: ["@ffmpeg/ffmpeg", "@ffmpeg/util", "mp4box"],
+  /**
+   * Strip diagnostic console output from production builds. Keeps console.error
+   * and console.warn so real failures still surface in the browser console for
+   * debugging support cases. Removes console.log / console.info / console.debug
+   * which are diagnostic only.
+   *
+   * Why this matters for perf: the watermark verification flow emits 30-50+
+   * console.log calls per run (frame decode results, render state, phase
+   * timings). Each call forces argument stringification and holds object
+   * references, which can take 1-5ms per call when DevTools is open and
+   * accumulates noticeable GC pressure on slower devices. More importantly,
+   * production users shouldn't see internal phase names, frame counts, and
+   * user IDs in their console.
+   *
+   * IMPORTANT: this is a build-time strip; verification logic is unchanged.
+   * The cryptographic operations, frame decoding, RSA verify, and consensus
+   * rules all run identically — they just stop emitting diagnostic output.
+   */
+  compiler: {
+    removeConsole:
+      process.env.NODE_ENV === "production"
+        ? {exclude: ["error", "warn"]}
+        : false,
+  },
   async headers() {
     return [
       {
