@@ -4,7 +4,6 @@ import {useCallback, useEffect, useRef, useState} from "react";
 import {VideoPlayer} from "@/components/video/VideoPlayer";
 import {LoadingSpinner} from "@/components/ui/loading-spinner";
 import {AlertTriangleIcon} from "lucide-react";
-import {prewarmWasmVerificationSession} from "@/lib/wasm-watermark-verification-client";
 
 type FetchStatus = "loading" | "ready" | "not_found" | "fetch_error";
 type VerificationStatus = "verifying" | "verified" | "failed" | null;
@@ -51,17 +50,6 @@ export function EmbedVideoView({videoId, initialPlaybackUrl, initialError}: Prop
 
   const fetchInflightRef = useRef(false);
   const skipNextFetchRef = useRef(Boolean(initialPlaybackUrl) || initialError?.status === 404);
-  const prewarmedUrlsRef = useRef<Set<string>>(new Set());
-
-  // Start WASM verification session prewarm immediately when the URL is
-  // available, ahead of VideoPlayer mount. See /v/[id]/_view.tsx for full
-  // rationale. SAFE: changes only timing; verification logic is unchanged.
-  useEffect(() => {
-    if (!playbackUrl) return;
-    if (prewarmedUrlsRef.current.has(playbackUrl)) return;
-    prewarmedUrlsRef.current.add(playbackUrl);
-    void prewarmWasmVerificationSession(playbackUrl);
-  }, [playbackUrl]);
 
   useEffect(() => {
     let cancelled = false;
