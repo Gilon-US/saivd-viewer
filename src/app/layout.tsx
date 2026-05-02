@@ -52,12 +52,20 @@ export default function RootLayout({
         <link rel="dns-prefetch" href={WASABI_ORIGIN} />
         {/* Preload the FFmpeg WASM so its download starts during HTML parse,
             in parallel with the JS bundle. By the time verification runs, the
-            WASM is already in the HTTP cache. */}
+            WASM is already in the HTTP cache.
+
+            IMPORTANT: no `crossOrigin` attribute. The WASM is same-origin to the
+            page; FFmpeg's internal loader fetches it with default credentials
+            mode ("same-origin"). If we set crossOrigin="anonymous" here, the
+            preload's credentials mode is "omit" — that mismatch causes the
+            browser to NOT use the preload entry for FFmpeg's actual fetch,
+            making the preload wasted and the WASM downloaded twice. Visible as
+            the warning "A preload for ... is found, but is not used because
+            the request credentials mode does not match." */}
         <link
           rel="preload"
           as="fetch"
           href="/ffmpeg/ffmpeg-core.wasm"
-          crossOrigin="anonymous"
           type="application/wasm"
         />
       </head>

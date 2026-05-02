@@ -14,10 +14,17 @@ export function getFfmpegCoreUrls(origin: string): {coreURL: string; wasmURL: st
   };
 }
 
-/** Best-effort cache warm for ffmpeg static assets (browser only). */
+/** Best-effort cache warm for ffmpeg static assets (browser only).
+ *  Uses default fetch options (mode: "cors" implied for cross-origin, but the
+ *  URLs are same-origin to the document so this is effectively same-origin
+ *  with credentials: "same-origin"). This MUST match how FFmpeg's internal
+ *  loader fetches the WASM, otherwise the prewarm populates a different
+ *  HTTP cache entry than what the loader will request, and the prewarm is
+ *  wasted. Symptom of mismatch: "preloaded but not used within a few seconds"
+ *  warning in the console, and the WASM downloads twice. */
 export function prewarmFfmpegVerificationAssets(): void {
   if (typeof window === "undefined") return;
   const {coreURL, wasmURL} = getFfmpegCoreUrls(window.location.origin);
-  void fetch(coreURL, {mode: "cors", credentials: "omit"}).catch(() => {});
-  void fetch(wasmURL, {mode: "cors", credentials: "omit"}).catch(() => {});
+  void fetch(coreURL).catch(() => {});
+  void fetch(wasmURL).catch(() => {});
 }
