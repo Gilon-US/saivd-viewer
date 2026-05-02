@@ -245,7 +245,7 @@ export function VideoPlayer({
               }}
               disabled={!creatorProfileUrl}
               aria-label="View creator profile"
-              className="absolute top-2 left-2 sm:top-4 sm:left-4 z-20 qr-logo-flip-container cursor-pointer disabled:cursor-default focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/80 rounded-md">
+              className="absolute top-2 right-2 sm:top-4 sm:right-4 z-20 qr-logo-flip-container cursor-pointer disabled:cursor-default focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/80 rounded-md">
               <div className="qr-logo-flip-card">
                 <div className="qr-logo-flip-face qr-logo-flip-face-front">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
