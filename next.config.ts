@@ -7,7 +7,7 @@ import path from "node:path";
  * `prewarmStartedRef`) to dedupe work; under dev-mode Strict Mode, components
  * mount → unmount → remount on initial mount, the cleanup sets `mounted = false`
  * in the in-flight `runVerification` closure, and the remount short-circuits via
- * the ref guards — so verification gets stuck on "Checking watermark on frame 0"
+ * the ref guards — so verification gets stuck on the frame_decode headline
  * forever. Strict Mode's double-mount is dev-only, so production / cloud builds
  * are unaffected either way.
  *

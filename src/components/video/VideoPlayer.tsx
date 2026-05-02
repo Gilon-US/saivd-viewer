@@ -322,7 +322,7 @@ function phaseHeadline(phase?: VerificationProgressPhase): string {
     case "ffmpeg_load":
       return "Loading verification engine";
     case "frame_decode":
-      return "Checking watermark on frame 0";
+      return "Video Verification";
     case "key_fetch":
       return "Retrieving signer key";
     case "rsa_verify":
@@ -353,8 +353,8 @@ function phaseMicrocopy(phase: VerificationProgressPhase | undefined, index: num
       "One-time setup can take a little longer on mobile.",
     ],
     frame_decode: [
-      "Decoding frame 0 and extracting watermark bits.",
-      "Checking embedded identity markers now.",
+      "Video integrity validation",
+      "Creator identity verification",
     ],
     key_fetch: [
       "Fetching the creator verification key.",
