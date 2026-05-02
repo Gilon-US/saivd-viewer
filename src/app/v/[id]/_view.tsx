@@ -1,6 +1,6 @@
 "use client";
 
-import {use, useCallback, useEffect, useRef, useState} from "react";
+import {useCallback, useEffect, useRef, useState} from "react";
 import Link from "next/link";
 import {VideoPlayer} from "@/components/video/VideoPlayer";
 import {LoadingSpinner} from "@/components/ui/loading-spinner";
@@ -13,11 +13,27 @@ type VerificationStatus = "verifying" | "verified" | "failed" | null;
 const SAIVD_API_ORIGIN =
   process.env.NEXT_PUBLIC_SAIVD_API_URL ?? "https://saivd.netlify.app";
 
+type InitialError = {code: string; message: string; status: number};
+
+type Props = {
+  videoId: string;
+  /** Presigned playback URL prefetched on the server. Null when the server-side
+   *  prefetch failed; in that case the client falls back to its own fetch via
+   *  /api/public/videos/[id]/play. */
+  initialPlaybackUrl: string | null;
+  /** Structured error from the server-side prefetch. Set when initialPlaybackUrl
+   *  is null and the failure was a deterministic outcome (404 not_found, etc.)
+   *  rather than a transient error. The client view skips the retry path for
+   *  404s and goes straight to the not-found UI. */
+  initialError: InitialError | null;
+};
+
 /**
  * Public, unauthenticated video viewer at /v/[id].
  *
  * Flow:
- *  1. Fetch a presigned playback URL from /api/public/videos/[id]/play.
+ *  1. Prefer the server-prefetched playback URL (initialPlaybackUrl). If absent,
+ *     fall back to fetching /api/public/videos/[id]/play client-side.
  *  2. Open the same VideoPlayer used in the dashboard, with frame analysis on.
  *  3. The player runs the standard frame-0 + every-10th-frame watermark verification
  *     and renders the QR overlay (linking to ${SAIVD_API_ORIGIN}/profile/{id}) once
@@ -25,27 +41,47 @@ const SAIVD_API_ORIGIN =
  *  4. On close, keep the user on the page and show a "finished watching" card with a
  *     Replay button. Verification failure is messaged explicitly on the page.
  *
- * Important: this page does NOT modify VideoPlayer. It uses the component exactly as
- * the dashboard does, passing the same props. All page-specific UX (replay card,
- * not-found card, "Powered by SAIVD") lives in this file only.
+ * On retry (e.g. presigned URL expired during a long session), the client always
+ * goes through /api/public/videos/[id]/play to get a fresh URL — never reuses the
+ * server-prefetched one, since by the time retry is needed the original is likely
+ * stale anyway.
  */
-export function PublicVideoView({params}: {params: Promise<{id: string}>}) {
-  const {id: videoId} = use(params);
+export function PublicVideoView({videoId, initialPlaybackUrl, initialError}: Props) {
+  // If the server prefetch produced a URL, jump straight to "ready" + "verifying".
+  // If it returned a deterministic 404, jump straight to "not_found" — no retry.
+  // Otherwise (no URL, no specific error), start in "loading" and let the effect fetch.
+  const initialStatus: FetchStatus = initialPlaybackUrl
+    ? "ready"
+    : initialError?.status === 404
+      ? "not_found"
+      : "loading";
 
-  const [fetchStatus, setFetchStatus] = useState<FetchStatus>("loading");
-  const [fetchError, setFetchError] = useState<string | null>(null);
-  const [playbackUrl, setPlaybackUrl] = useState<string | null>(null);
-  const [playerOpen, setPlayerOpen] = useState(false);
-  const [verificationStatus, setVerificationStatus] = useState<VerificationStatus>(null);
+  const [fetchStatus, setFetchStatus] = useState<FetchStatus>(initialStatus);
+  const [fetchError, setFetchError] = useState<string | null>(
+    initialError && initialError.status !== 404 ? initialError.message : null
+  );
+  const [playbackUrl, setPlaybackUrl] = useState<string | null>(initialPlaybackUrl);
+  const [playerOpen, setPlayerOpen] = useState(Boolean(initialPlaybackUrl));
+  const [verificationStatus, setVerificationStatus] = useState<VerificationStatus>(
+    initialPlaybackUrl ? "verifying" : null
+  );
   const [verifiedUserId, setVerifiedUserId] = useState<string | null>(null);
   const [retryCount, setRetryCount] = useState(0);
 
   const fetchInflightRef = useRef(false);
+  // Track whether we've already consumed the server-prefetched URL so the
+  // initial mount doesn't trigger a redundant client-side fetch.
+  const skipNextFetchRef = useRef(Boolean(initialPlaybackUrl) || initialError?.status === 404);
 
-  // Fetch a presigned playback URL on mount or retry. Guarded with a ref so dev-mode
-  // double-effects (or React 19 re-runs) don't generate two presigned URLs.
+  // Client-side fetch fallback. Runs only when:
+  //   - server prefetch did not provide a URL AND it wasn't a definitive 404, OR
+  //   - the user clicked "Try again" / "Replay" and we need a fresh presigned URL.
   useEffect(() => {
     let cancelled = false;
+    if (skipNextFetchRef.current) {
+      skipNextFetchRef.current = false;
+      return;
+    }
     if (fetchInflightRef.current) return;
     fetchInflightRef.current = true;
 

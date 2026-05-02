@@ -1,8 +1,14 @@
 import type {Metadata} from "next";
 import {PublicVideoView} from "./_view";
+import {getPublicPlaybackData} from "@/lib/playback-url";
 
 const APP_URL =
   process.env.NEXT_PUBLIC_APP_URL ?? "https://viewer.saivd.io";
+
+/** ISR: regenerate the rendered page (and its prefetched presigned URL) every
+ *  60s. Well under the 1-hour Wasabi presign expiry, so cached pages always
+ *  have a valid URL. Saves Supabase + Wasabi calls on repeat traffic. */
+export const revalidate = 60;
 
 type Params = {id: string};
 
@@ -60,6 +66,25 @@ export async function generateMetadata({params}: {params: Promise<Params>}): Pro
   };
 }
 
-export default function PublicVideoPage({params}: {params: Promise<Params>}) {
-  return <PublicVideoView params={params} />;
+/**
+ * Server-component shell. Resolves the presigned playback URL during render
+ * and passes it to the client view as `initialPlaybackUrl`, eliminating the
+ * client-side fetch round-trip for the common path. If the prefetch fails,
+ * pass null and let the client view fall back to its own fetch — the existing
+ * /api/public/videos/[id]/play endpoint handles all the same error cases.
+ *
+ * Cache-Control on this page is intentionally short (60s) because the rendered
+ * HTML now contains a presigned URL that expires in 1 hour.
+ */
+export default async function PublicVideoPage({params}: {params: Promise<Params>}) {
+  const {id} = await params;
+  const result = await getPublicPlaybackData(id, "watermarked");
+
+  return (
+    <PublicVideoView
+      videoId={id}
+      initialPlaybackUrl={result.ok ? result.playbackUrl : null}
+      initialError={result.ok ? null : {code: result.code, message: result.message, status: result.status}}
+    />
+  );
 }
