@@ -50,24 +50,15 @@ export default function RootLayout({
         <link rel="dns-prefetch" href={SAIVD_API_ORIGIN} />
         <link rel="preconnect" href={WASABI_ORIGIN} crossOrigin="anonymous" />
         <link rel="dns-prefetch" href={WASABI_ORIGIN} />
-        {/* Preload the FFmpeg WASM so its download starts during HTML parse,
-            in parallel with the JS bundle. By the time verification runs, the
-            WASM is already in the HTTP cache.
-
-            IMPORTANT: no `crossOrigin` attribute. The WASM is same-origin to the
-            page; FFmpeg's internal loader fetches it with default credentials
-            mode ("same-origin"). If we set crossOrigin="anonymous" here, the
-            preload's credentials mode is "omit" — that mismatch causes the
-            browser to NOT use the preload entry for FFmpeg's actual fetch,
-            making the preload wasted and the WASM downloaded twice. Visible as
-            the warning "A preload for ... is found, but is not used because
-            the request credentials mode does not match." */}
-        <link
-          rel="preload"
-          as="fetch"
-          href="/ffmpeg/ffmpeg-core.wasm"
-          type="application/wasm"
-        />
+        {/* No <link rel="preload"> for ffmpeg-core.wasm. By spec, preload's
+            credentials mode is constrained to "include" (no crossorigin) or
+            "omit" (crossorigin="anonymous") or "include" (use-credentials);
+            it cannot be "same-origin", which is what default fetch() uses for
+            same-origin URLs. Any preload tag here will produce a credentials
+            mismatch with FFmpeg's loader, the preload won't be used, and the
+            WASM downloads twice. Use prewarmFfmpegVerificationAssets() instead
+            (called on app shell mount) — it uses real fetch() which can be
+            aligned with FFmpeg's loader. */}
       </head>
       <body className={`${geistSans.variable} ${geistMono.variable} antialiased`} suppressHydrationWarning={true}>
         <AuthProvider>
