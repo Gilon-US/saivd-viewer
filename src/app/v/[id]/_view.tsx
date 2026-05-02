@@ -6,6 +6,7 @@ import {VideoPlayer} from "@/components/video/VideoPlayer";
 import {LoadingSpinner} from "@/components/ui/loading-spinner";
 import {Button} from "@/components/ui/button";
 import {AlertTriangleIcon, PlayIcon, RefreshCwIcon} from "lucide-react";
+import {prewarmWasmVerificationSession} from "@/lib/wasm-watermark-verification-client";
 
 type FetchStatus = "loading" | "ready" | "not_found" | "fetch_error";
 type VerificationStatus = "verifying" | "verified" | "failed" | null;
@@ -72,6 +73,22 @@ export function PublicVideoView({videoId, initialPlaybackUrl, initialError}: Pro
   // Track whether we've already consumed the server-prefetched URL so the
   // initial mount doesn't trigger a redundant client-side fetch.
   const skipNextFetchRef = useRef(Boolean(initialPlaybackUrl) || initialError?.status === 404);
+  // Track which URLs we've already kicked off prewarm for, so retries with new
+  // URLs prewarm the new one but stable URLs don't re-prewarm on every render.
+  const prewarmedUrlsRef = useRef<Set<string>>(new Set());
+
+  // Kick off the WASM verification session prewarm as soon as we have a URL —
+  // ahead of VideoPlayer mounting and ahead of the verification hook firing.
+  // The hook deduplicates back-to-back calls via ensureWasmVerificationSession,
+  // so this is safe to call from multiple sites. Eliminates the prewarm time
+  // from the verification critical path by overlapping it with React hydration.
+  // SAFE: changes only *when* prewarm starts; verification logic is unchanged.
+  useEffect(() => {
+    if (!playbackUrl) return;
+    if (prewarmedUrlsRef.current.has(playbackUrl)) return;
+    prewarmedUrlsRef.current.add(playbackUrl);
+    void prewarmWasmVerificationSession(playbackUrl);
+  }, [playbackUrl]);
 
   // Client-side fetch fallback. Runs only when:
   //   - server prefetch did not provide a URL AND it wasn't a definitive 404, OR
