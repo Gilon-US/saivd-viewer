@@ -37,13 +37,20 @@ export async function GET(req: NextRequest) {
   const {width, height} = fitToBox(maxwidth, maxheight, 16 / 9);
   const embedUrl = `${APP_URL}/embed/${videoId}`;
 
+  // Wrapper div + responsive iframe. The wrapper is needed because some builder
+  // products (Hostinger Website Builder mobile theme, certain Wix layouts, some
+  // Squarespace blocks) interpret bare iframe width/height attributes as fixed
+  // pixel hints on mobile, fighting the responsive CSS. The div forces those
+  // builders to size by container width, and the iframe inside fills it via
+  // aspect-ratio:16/9 (supported in all browsers since late 2021).
   const html =
+    `<div style="width:100%;max-width:100%;margin:0 auto;">` +
     `<iframe src="${embedUrl}" ` +
-    `width="${width}" height="${height}" ` +
     `style="width:100%;aspect-ratio:16/9;border:0;display:block;" ` +
     `allow="autoplay; fullscreen; picture-in-picture" allowfullscreen ` +
     `loading="lazy" referrerpolicy="strict-origin-when-cross-origin" ` +
-    `title="SAIVD verified video"></iframe>`;
+    `title="SAIVD verified video"></iframe>` +
+    `</div>`;
 
   return NextResponse.json(
     {

@@ -433,19 +433,21 @@ import {
 const handleCopyEmbed = async (videoId: string) => {
   const embedUrl = `${window.location.origin}/embed/${videoId}`;
   // Universal embed snippet — works in Hostinger, Wix, WordPress (Custom HTML),
-  // Squarespace, Webflow, Ghost, raw HTML. No wrapper div (avoids fights with
-  // builders that wrap embedded HTML in their own fixed-size container).
-  // aspect-ratio is the modern responsive sizing primitive (all browsers since
-  // late 2021); width/height attributes are the fallback so the iframe never
-  // collapses to zero in older or quirky environments.
+  // Squarespace, Webflow, Ghost, raw HTML. The wrapper <div> with width:100%
+  // forces builder products to honor the parent container's width on mobile;
+  // some builders' mobile themes interpret bare iframe width/height attributes
+  // as fixed pixels, fighting the responsive CSS. The aspect-ratio:16/9 on the
+  // iframe is the modern responsive sizing primitive (all browsers since late
+  // 2021) and maintains ratio at any width without explicit height bookkeeping.
   const snippet =
-    `<iframe src="${embedUrl}"\n` +
-    `        width="100%" height="400"\n` +
-    `        style="width:100%;aspect-ratio:16/9;border:0;display:block;"\n` +
-    `        allow="autoplay; fullscreen; picture-in-picture"\n` +
-    `        allowfullscreen loading="lazy"\n` +
-    `        referrerpolicy="strict-origin-when-cross-origin"\n` +
-    `        title="SAIVD verified video"></iframe>`;
+    `<div style="width:100%;max-width:100%;margin:0 auto;">\n` +
+    `  <iframe src="${embedUrl}"\n` +
+    `          style="width:100%;aspect-ratio:16/9;border:0;display:block;"\n` +
+    `          allow="autoplay; fullscreen; picture-in-picture"\n` +
+    `          allowfullscreen loading="lazy"\n` +
+    `          referrerpolicy="strict-origin-when-cross-origin"\n` +
+    `          title="SAIVD verified video"></iframe>\n` +
+    `</div>`;
 
   try {
     await navigator.clipboard.writeText(snippet);

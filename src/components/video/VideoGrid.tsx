@@ -166,14 +166,23 @@ export function VideoGrid({videos, isLoading, error, onRefresh, onOpenUploadModa
       const origin =
         typeof window !== "undefined" && window.location?.origin ? window.location.origin : "";
       const embedUrl = `${origin}/embed/${videoId}`;
+      // Universal embed snippet — works in Hostinger, Wix, WordPress (Custom HTML),
+      // Squarespace, Webflow, Ghost, raw HTML. The wrapper <div> with width:100%
+      // forces builder products to honor the parent container's width on mobile;
+      // some builders' mobile themes interpret bare iframe width/height attributes
+      // as fixed pixels, fighting the responsive CSS. Wrapping in a div sidesteps
+      // that. The iframe uses aspect-ratio:16/9 (modern, supported in all browsers
+      // since late 2021) so it maintains ratio at any width without needing
+      // explicit height bookkeeping.
       const snippet =
-        `<iframe src="${embedUrl}"\n` +
-        `        width="100%" height="400"\n` +
-        `        style="width:100%;aspect-ratio:16/9;border:0;display:block;"\n` +
-        `        allow="autoplay; fullscreen; picture-in-picture"\n` +
-        `        allowfullscreen loading="lazy"\n` +
-        `        referrerpolicy="strict-origin-when-cross-origin"\n` +
-        `        title="SAIVD verified video"></iframe>`;
+        `<div style="width:100%;max-width:100%;margin:0 auto;">\n` +
+        `  <iframe src="${embedUrl}"\n` +
+        `          style="width:100%;aspect-ratio:16/9;border:0;display:block;"\n` +
+        `          allow="autoplay; fullscreen; picture-in-picture"\n` +
+        `          allowfullscreen loading="lazy"\n` +
+        `          referrerpolicy="strict-origin-when-cross-origin"\n` +
+        `          title="SAIVD verified video"></iframe>\n` +
+        `</div>`;
 
       try {
         if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
