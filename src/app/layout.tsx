@@ -1,7 +1,6 @@
 import type {Metadata} from "next";
 import {Geist, Geist_Mono} from "next/font/google";
 import {Toaster} from "@/components/ui/sonner";
-import {FfmpegVerificationAssetPrewarm} from "@/components/video/FfmpegVerificationAssetPrewarm";
 import {AuthProvider} from "@/contexts/AuthContext";
 import "./globals.css";
 
@@ -56,13 +55,18 @@ export default function RootLayout({
             it cannot be "same-origin", which is what default fetch() uses for
             same-origin URLs. Any preload tag here will produce a credentials
             mismatch with FFmpeg's loader, the preload won't be used, and the
-            WASM downloads twice. Use prewarmFfmpegVerificationAssets() instead
-            (called on app shell mount) — it uses real fetch() which can be
-            aligned with FFmpeg's loader. */}
+            WASM downloads twice.
+
+            We previously also ran <FfmpegVerificationAssetPrewarm /> here to
+            populate the HTTP cache via main-thread fetch(). Confirmed via
+            DevTools that the worker's fetches did NOT share that cache (3×
+            fresh ffmpeg-core.js downloads on /v/[id] with disable-cache off),
+            so the prewarm was producing zero benefit while costing one extra
+            JS fetch and one full WASM download per first-time page load.
+            Removed. The worker still loads what it needs when it needs it. */}
       </head>
       <body className={`${geistSans.variable} ${geistMono.variable} antialiased`} suppressHydrationWarning={true}>
         <AuthProvider>
-          <FfmpegVerificationAssetPrewarm />
           {children}
           <Toaster />
         </AuthProvider>
