@@ -20,6 +20,17 @@ const nextConfig: NextConfig = {
   ...(process.env.USE_STANDALONE_OUTPUT === "true" ? { output: "standalone" as const } : {}),
   reactStrictMode: !strictModeDisabledForSession,
   transpilePackages: ["@ffmpeg/ffmpeg", "@ffmpeg/util", "mp4box"],
+  async headers() {
+    return [
+      {
+        source: "/embed/:path*",
+        headers: [
+          {key: "Access-Control-Allow-Origin", value: "*"},
+          {key: "Access-Control-Allow-Methods", value: "GET, HEAD, OPTIONS"},
+        ],
+      },
+    ];
+  },
   experimental: {
     // Add any experimental features here
   },

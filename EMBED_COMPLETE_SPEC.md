@@ -528,6 +528,19 @@ Replace the entire file with:
     Access-Control-Allow-Origin = "*"
     Access-Control-Allow-Methods = "GET, OPTIONS"
     Cache-Control = "public, s-maxage=3600, max-age=3600"
+
+# Public video API must be cross-origin readable. Builder products (Hostinger
+# Website Builder, Wix, Squarespace) wrap user-embedded iframes with a sandbox
+# that strips `allow-same-origin`, making the iframe's origin opaque (null).
+# Without these CORS headers, the embed page's fetch to /api/public/videos/[id]/play
+# fails with "Failed to fetch" because it's treated as a cross-origin request
+# from a null origin. The endpoint is already public (no auth) so this doesn't
+# change the security posture.
+[[headers]]
+  for = "/api/public/*"
+  [headers.values]
+    Access-Control-Allow-Origin = "*"
+    Access-Control-Allow-Methods = "GET, OPTIONS"
 ```
 
 The previous `/* → /index.html` SPA rewrite is removed deliberately. Next.js routing on Netlify is handled by Netlify's built-in Next runtime, not SPA fallback. Do not re-add that redirect. If routing breaks in production after this change, the correct fix is to add `@netlify/plugin-nextjs` and a `[[plugins]]` block — not to bring back the SPA redirect.

@@ -34,7 +34,11 @@ export default function EmbedVideoPage({params}: {params: Promise<{id: string}>}
 
     const load = async () => {
       try {
-        const res = await fetch(`/api/public/videos/${videoId}/play?variant=watermarked`);
+        const apiOrigin =
+          typeof window !== "undefined" && window.location?.origin ? window.location.origin : "";
+        const res = await fetch(
+          `${apiOrigin}/api/public/videos/${videoId}/play?variant=watermarked`
+        );
         const body = await res.json().catch(() => null);
 
         if (cancelled) return;
