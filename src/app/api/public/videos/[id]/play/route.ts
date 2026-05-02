@@ -115,7 +115,19 @@ export async function GET(request: NextRequest, context: {params: Promise<{id: s
           playbackUrl,
         },
       },
-      {headers: {...CORS_HEADERS}}
+      {
+        headers: {
+          ...CORS_HEADERS,
+          // Edge-cache the response briefly so reloads / multiple users hitting the
+          // same video within a short window skip the Supabase + Wasabi presign work.
+          // 30s is well under the 1-hour presigned URL expiry, so cached URLs always
+          // have ~59 minutes of validity left when served.
+          "Cache-Control": "public, s-maxage=30, stale-while-revalidate=60",
+          // Make sure caches key by the variant query parameter so watermarked
+          // and original responses don't collide.
+          "Vary": "Accept-Encoding",
+        },
+      }
     );
   } catch (error) {
     console.error("Error generating public playback URL:", error);

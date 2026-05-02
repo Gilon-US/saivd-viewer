@@ -36,10 +36,75 @@ type UseWatermarkVerificationOptions = {
 
 const SESSION_KEEPALIVE_TTL_MS = 45000;
 
+/** sessionStorage cache of creator public keys to avoid refetching across video plays.
+ *  Keys are public-by-design; sessionStorage scope is per-tab and clears on close.
+ *  Cache poisoning requires XSS, in which case verification is already trivially
+ *  bypassable via direct DOM manipulation — the cache is not the weakest link.
+ *  TTL bounds the impact of legitimate key rotation; clearCachedPem() lets callers
+ *  invalidate on signature-verify failure and retry once. */
+const PUBLIC_KEY_CACHE_PREFIX = "saivd-pubkey-v1:";
+const PUBLIC_KEY_CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
+
+type CachedKey = {pem: string; fetchedAt: number};
+
+function isLikelyValidPem(pem: unknown): pem is string {
+  return (
+    typeof pem === "string" &&
+    pem.includes("-----BEGIN PUBLIC KEY-----") &&
+    pem.includes("-----END PUBLIC KEY-----") &&
+    pem.length < 4096 // sanity bound — RSA-4096 PEMs are ~800 bytes
+  );
+}
+
+function readCachedPem(numericUserId: number): string | null {
+  try {
+    const raw = sessionStorage.getItem(`${PUBLIC_KEY_CACHE_PREFIX}${numericUserId}`);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as CachedKey;
+    if (!parsed || typeof parsed.fetchedAt !== "number") return null;
+    if (Date.now() - parsed.fetchedAt > PUBLIC_KEY_CACHE_TTL_MS) return null;
+    if (!isLikelyValidPem(parsed.pem)) return null;
+    return parsed.pem;
+  } catch {
+    return null;
+  }
+}
+
+function writeCachedPem(numericUserId: number, pem: string): void {
+  if (!isLikelyValidPem(pem)) return;
+  try {
+    const value: CachedKey = {pem, fetchedAt: Date.now()};
+    sessionStorage.setItem(`${PUBLIC_KEY_CACHE_PREFIX}${numericUserId}`, JSON.stringify(value));
+  } catch {
+    /* sessionStorage may be unavailable in sandboxed embed contexts; silently skip */
+  }
+}
+
+/** Invalidate a cached public key. Call this after RSA verify fails to handle
+ *  legitimate key rotation and to recover from any cache poisoning, then retry
+ *  the fetch with bypassCache:true once before declaring the video unverified. */
+export function clearCachedPublicKey(numericUserId: number): void {
+  try {
+    sessionStorage.removeItem(`${PUBLIC_KEY_CACHE_PREFIX}${numericUserId}`);
+  } catch {
+    /* ignore */
+  }
+}
+
 /**
  * Fetch public key PEM from external SAIVD API by numeric_user_id.
+ * Returns from sessionStorage cache when available and valid; otherwise fetches
+ * fresh and writes the cache.
  */
-async function fetchPublicKeyPemFromSaivd(numericUserId: number): Promise<string> {
+async function fetchPublicKeyPemFromSaivd(
+  numericUserId: number,
+  options: {bypassCache?: boolean} = {}
+): Promise<string> {
+  if (!options.bypassCache) {
+    const cached = readCachedPem(numericUserId);
+    if (cached) return cached;
+  }
+
   const SAIVD_API_ORIGIN =
     process.env.NEXT_PUBLIC_SAIVD_API_URL ?? "https://saivd.netlify.app";
   const res = await fetch(`${SAIVD_API_ORIGIN}/api/users/${numericUserId}/public-key`, {
@@ -53,6 +118,10 @@ async function fetchPublicKeyPemFromSaivd(numericUserId: number): Promise<string
   if (!data.success || !data.data?.public_key_pem) {
     throw new Error("Invalid public key response");
   }
+  if (!isLikelyValidPem(data.data.public_key_pem)) {
+    throw new Error("Invalid public key format");
+  }
+  writeCachedPem(numericUserId, data.data.public_key_pem);
   return data.data.public_key_pem;
 }
 
