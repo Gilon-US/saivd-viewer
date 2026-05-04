@@ -35,3 +35,5 @@ export function createAdminClient() {
     },
   });
 }
+
+export {createAdminClient as createServiceRoleClient};

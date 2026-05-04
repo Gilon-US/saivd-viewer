@@ -4,6 +4,8 @@ import {ReactNode} from "react";
 import Link from "next/link";
 import {LogoutButton} from "@/components/auth/LogoutButton";
 import {useAuth} from "@/contexts/AuthContext";
+import {useProfile} from "@/contexts/ProfileContext";
+import {isStaffProfile} from "@/lib/app-role";
 
 interface DashboardLayoutProps {
   children: ReactNode;
@@ -11,7 +13,9 @@ interface DashboardLayoutProps {
 
 export default function DashboardLayout({children}: DashboardLayoutProps) {
   const {user} = useAuth();
-  
+  const {profile} = useProfile();
+  const isStaff = isStaffProfile(profile, user?.email);
+
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
       <div className="flex flex-col">
@@ -22,16 +26,30 @@ export default function DashboardLayout({children}: DashboardLayoutProps) {
                 SAIVD Viewer
               </Link>
               <nav className="hidden md:flex space-x-4">
-                <Link href="/dashboard" className="px-3 py-2 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700">
+                <Link
+                  href="/dashboard"
+                  className="px-3 py-2 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700">
                   Dashboard
                 </Link>
+                {isStaff && (
+                  <Link
+                    href="/dashboard/settings"
+                    className="px-3 py-2 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700">
+                    Settings
+                  </Link>
+                )}
               </nav>
             </div>
             <div className="flex items-center gap-3">
               {user?.email && (
-                <span className="text-sm text-gray-600 dark:text-gray-400">
-                  {user.email}
-                </span>
+                <div className="flex flex-col items-end">
+                  {profile?.display_name && (
+                    <span className="text-sm font-medium text-gray-800 dark:text-gray-200 leading-tight">
+                      {profile.display_name}
+                    </span>
+                  )}
+                  <span className="text-xs text-gray-500 dark:text-gray-400">{user.email}</span>
+                </div>
               )}
               <LogoutButton variant="ghost" size="sm" showIcon={true} />
             </div>

@@ -1,10 +1,13 @@
 'use client';
 
-import { useState } from 'react';
-import { VideoUploader } from '@/components/video/VideoUploader';
-import { Button } from '@/components/ui/button';
-import { XIcon } from 'lucide-react';
-import { UploadResult } from '@/hooks/useVideoUpload';
+import {useState, FormEvent} from 'react';
+import {useRouter} from 'next/navigation';
+import {VideoUploader} from '@/components/video/VideoUploader';
+import {Button} from '@/components/ui/button';
+import {Input} from '@/components/ui/input';
+import {XIcon, HardDriveUploadIcon, LinkIcon} from 'lucide-react';
+import {UploadResult} from '@/hooks/useVideoUpload';
+import {cn} from '@/lib/utils';
 
 type UploadModalProps = {
   isOpen: boolean;
@@ -12,23 +15,52 @@ type UploadModalProps = {
   onUploadComplete: (result: UploadResult) => void;
 };
 
-export function UploadModal({ isOpen, onClose, onUploadComplete }: UploadModalProps) {
+type Tab = 'disk' | 'link';
+
+function extractClaimToken(input: string): string | null {
+  const trimmed = input.trim();
+  // Full URL: https://…/claim/<token>
+  const urlMatch = trimmed.match(/\/claim\/([A-Za-z0-9_\-]+)$/);
+  if (urlMatch) return urlMatch[1];
+  // Bare token (no slashes, looks like a token)
+  if (/^[A-Za-z0-9_\-]{10,}$/.test(trimmed)) return trimmed;
+  return null;
+}
+
+export function UploadModal({isOpen, onClose, onUploadComplete}: UploadModalProps) {
+  const router = useRouter();
   const [uploadComplete, setUploadComplete] = useState(false);
-  
+  const [tab, setTab] = useState<Tab>('disk');
+  const [claimLink, setClaimLink] = useState('');
+  const [claimError, setClaimError] = useState<string | null>(null);
+
   const handleUploadComplete = (result: UploadResult) => {
     setUploadComplete(true);
     onUploadComplete(result);
   };
-  
+
   const handleClose = () => {
     setUploadComplete(false);
+    setTab('disk');
+    setClaimLink('');
+    setClaimError(null);
     onClose();
   };
-  
-  if (!isOpen) {
-    return null;
-  }
-  
+
+  const handleClaimSubmit = (e: FormEvent) => {
+    e.preventDefault();
+    setClaimError(null);
+    const token = extractClaimToken(claimLink);
+    if (!token) {
+      setClaimError('Paste a valid claim link (e.g. https://viewer.saivd.io/claim/…) or just the token.');
+      return;
+    }
+    handleClose();
+    router.push(`/claim/${token}`);
+  };
+
+  if (!isOpen) return null;
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
       <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg w-full max-w-3xl max-h-[90vh] overflow-y-auto">
@@ -40,31 +72,78 @@ export function UploadModal({ isOpen, onClose, onUploadComplete }: UploadModalPr
             <XIcon className="h-5 w-5" />
           </Button>
         </div>
-        
+
         <div className="p-6">
           {!uploadComplete ? (
-            <div className="space-y-4">
-              <p className="text-gray-500 dark:text-gray-400 mb-4">
-                Select a video to upload. Supported formats: MP4, MOV, AVI, WEBM. Maximum file size: 500MB.
-              </p>
-              <VideoUploader onUploadComplete={handleUploadComplete} />
-            </div>
+            <>
+              {/* Tab switcher */}
+              <div className="flex gap-2 mb-6">
+                <button
+                  onClick={() => setTab('disk')}
+                  className={cn(
+                    'flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium border transition-colors',
+                    tab === 'disk'
+                      ? 'bg-gray-900 text-white border-gray-900 dark:bg-gray-100 dark:text-gray-900 dark:border-gray-100'
+                      : 'text-gray-600 border-gray-200 hover:bg-gray-50 dark:text-gray-300 dark:border-gray-700 dark:hover:bg-gray-700'
+                  )}>
+                  <HardDriveUploadIcon className="h-4 w-4" />
+                  Upload from disk
+                </button>
+                <button
+                  onClick={() => setTab('link')}
+                  className={cn(
+                    'flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium border transition-colors',
+                    tab === 'link'
+                      ? 'bg-gray-900 text-white border-gray-900 dark:bg-gray-100 dark:text-gray-900 dark:border-gray-100'
+                      : 'text-gray-600 border-gray-200 hover:bg-gray-50 dark:text-gray-300 dark:border-gray-700 dark:hover:bg-gray-700'
+                  )}>
+                  <LinkIcon className="h-4 w-4" />
+                  Claim from link
+                </button>
+              </div>
+
+              {tab === 'disk' && (
+                <div className="space-y-4">
+                  <p className="text-gray-500 dark:text-gray-400">
+                    Select a video to upload. Supported formats: MP4, MOV, AVI, WEBM. Maximum file size: 500MB.
+                  </p>
+                  <VideoUploader onUploadComplete={handleUploadComplete} />
+                </div>
+              )}
+
+              {tab === 'link' && (
+                <form onSubmit={handleClaimSubmit} className="space-y-4">
+                  <div>
+                    <p className="text-gray-500 dark:text-gray-400 mb-4">
+                      Paste a claim link generated by a SAIVD creator to add their watermarked video to your library.
+                    </p>
+                    <Input
+                      value={claimLink}
+                      onChange={e => {
+                        setClaimLink(e.target.value);
+                        setClaimError(null);
+                      }}
+                      placeholder="https://viewer.saivd.io/claim/…"
+                      className="font-mono text-sm"
+                      autoFocus
+                    />
+                    {claimError && (
+                      <p className="mt-2 text-sm text-red-500">{claimError}</p>
+                    )}
+                  </div>
+                  <Button type="submit" disabled={!claimLink.trim()} className="w-full">
+                    <LinkIcon className="mr-2 h-4 w-4" />
+                    Open claim page
+                  </Button>
+                </form>
+              )}
+            </>
           ) : (
             <div className="text-center py-6">
               <div className="mb-6">
                 <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-green-100 dark:bg-green-900/20 mb-4">
-                  <svg
-                    className="w-8 h-8 text-green-600 dark:text-green-400"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M5 13l4 4L19 7"
-                    />
+                  <svg className="w-8 h-8 text-green-600 dark:text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                   </svg>
                 </div>
                 <h3 className="text-xl font-semibold text-green-600 dark:text-green-400 mb-2">
@@ -75,14 +154,10 @@ export function UploadModal({ isOpen, onClose, onUploadComplete }: UploadModalPr
                 </p>
               </div>
               <div className="flex justify-center gap-3">
-                <Button variant="outline" onClick={() => {
-                  setUploadComplete(false);
-                }}>
+                <Button variant="outline" onClick={() => setUploadComplete(false)}>
                   Upload Another Video
                 </Button>
-                <Button onClick={handleClose}>
-                  Close
-                </Button>
+                <Button onClick={handleClose}>Close</Button>
               </div>
             </div>
           )}
