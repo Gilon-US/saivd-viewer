@@ -1,9 +1,9 @@
 "use client";
 
 import {LoadingSpinner} from "@/components/ui/loading-spinner";
+import {PresentationQrFlipButton} from "@/components/presentation/PresentationQrFlipButton";
 import {useImageWatermarkVerification} from "@/hooks/useImageWatermarkVerification";
 import {imageViewProxyUrl} from "@/lib/image-verification-url";
-import {QrLogoFlipButton} from "./QrLogoFlipButton";
 
 type ImageLightboxProps = {
   isOpen: boolean;
@@ -48,7 +48,12 @@ export function ImageLightbox({isOpen, imageId, filename, onClose}: ImageLightbo
         />
 
         {verification.verifiedUserId !== null && !verification.isVerificationFailed && (
-          <QrLogoFlipButton numericUserId={verification.verifiedUserId} />
+          <PresentationQrFlipButton
+            numericUserId={verification.verifiedUserId}
+            mediaKind="image"
+            mediaId={imageId}
+            enabled={isOpen}
+          />
         )}
 
         {verification.verificationStatus === "verifying" && (

@@ -4,7 +4,7 @@ import {useEffect, useRef, useState} from "react";
 import {LoadingSpinner} from "@/components/ui/loading-spinner";
 import {AlertTriangleIcon} from "lucide-react";
 import {verifyImageWatermark} from "@/lib/image-watermark-verification";
-import {QrLogoFlipButton} from "./QrLogoFlipButton";
+import {PresentationQrFlipButton} from "@/components/presentation/PresentationQrFlipButton";
 
 type FetchStatus = "loading" | "ready" | "not_found" | "fetch_error";
 type VerificationStatus = "idle" | "verifying" | "verified" | "failed";
@@ -152,7 +152,12 @@ export function PublicImageView({
         )}
 
         {verificationStatus === "verified" && verifiedUserId !== null && (
-          <QrLogoFlipButton numericUserId={verifiedUserId} />
+          <PresentationQrFlipButton
+            numericUserId={verifiedUserId}
+            mediaKind="image"
+            mediaId={imageId}
+            enabled={fetchStatus === "ready"}
+          />
         )}
 
         {verificationStatus === "failed" && !embed && (
