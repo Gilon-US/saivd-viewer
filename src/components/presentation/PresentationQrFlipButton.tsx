@@ -32,7 +32,7 @@ export function PresentationQrFlipButton({
   className = "",
   mintEndpoint = "/api/presentation/mint",
 }: PresentationQrFlipButtonProps) {
-  const {qrDataUrl, scanUrl, isDynamic, staticQrUrl} = usePresentationQr({
+  const {qrDataUrl, isDynamic, staticQrUrl} = usePresentationQr({
     enabled,
     numericUserId,
     mediaKind,
@@ -49,8 +49,8 @@ export function PresentationQrFlipButton({
     <button
       type="button"
       onClick={() => {
-        const target = isDynamic && scanUrl ? scanUrl : profileUrl;
-        window.open(target, "_blank", "noopener,noreferrer");
+        // In-app click: always profile. QR image still encodes /p/… for camera scans.
+        window.open(profileUrl, "_blank", "noopener,noreferrer");
       }}
       aria-label="View creator profile"
       className={cn(
