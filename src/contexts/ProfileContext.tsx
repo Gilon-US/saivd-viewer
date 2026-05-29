@@ -3,11 +3,13 @@
 import {createContext, useCallback, useContext, useEffect, useState, ReactNode} from "react";
 import {useAuth} from "@/contexts/AuthContext";
 import type {AppRole} from "@/lib/app-role";
+import type {QrOverlayPosition} from "@/lib/presentation-qr/position";
 
 export interface Profile {
   id: string;
   email: string;
   display_name: string | null;
+  qr_overlay_position: QrOverlayPosition;
   role: AppRole;
   created_at: string;
   updated_at: string;
@@ -19,7 +21,9 @@ interface ProfileContextType {
   error: string | null;
   initialized: boolean;
   refreshProfile: () => Promise<void>;
-  updateProfile: (data: Partial<Pick<Profile, "display_name">>) => Promise<void>;
+  updateProfile: (
+    data: Partial<Pick<Profile, "display_name" | "qr_overlay_position">>,
+  ) => Promise<void>;
 }
 
 const ProfileContext = createContext<ProfileContextType | undefined>(undefined);
@@ -49,7 +53,7 @@ export function ProfileProvider({children}: {children: ReactNode}) {
   }, [user]);
 
   const updateProfile = useCallback(
-    async (data: Partial<Pick<Profile, "display_name">>) => {
+    async (data: Partial<Pick<Profile, "display_name" | "qr_overlay_position">>) => {
       if (!user) return;
       setLoading(true);
       setError(null);
@@ -61,7 +65,10 @@ export function ProfileProvider({children}: {children: ReactNode}) {
         });
         const json = await res.json();
         if (json.success) setProfile(json.data as Profile);
-        else setError(json.error);
+        else {
+          setError(json.error);
+          throw new Error(json.error ?? "Update failed");
+        }
       } finally {
         setLoading(false);
       }

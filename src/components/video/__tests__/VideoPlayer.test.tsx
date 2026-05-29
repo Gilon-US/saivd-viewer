@@ -18,6 +18,10 @@ jest.mock('@/hooks/useWatermarkVerification', () => ({
   useWatermarkVerification: jest.fn(),
 }));
 
+jest.mock('@/hooks/useCreatorQrOverlayPosition', () => ({
+  useCreatorQrOverlayPosition: () => 'top-right',
+}));
+
 describe('VideoPlayer', () => {
   const mockOnClose = jest.fn();
   const defaultProps = {
@@ -159,6 +163,7 @@ describe('VideoPlayer', () => {
         enableFrameAnalysis
         verificationStatus="verified"
         verifiedUserId="123"
+        videoId="test-video-id"
       />
     );
 

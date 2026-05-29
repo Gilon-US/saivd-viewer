@@ -5,6 +5,7 @@ import {LoadingSpinner} from "@/components/ui/loading-spinner";
 import {AlertTriangleIcon} from "lucide-react";
 import {verifyImageWatermark} from "@/lib/image-watermark-verification";
 import {PresentationQrFlipButton} from "@/components/presentation/PresentationQrFlipButton";
+import {useCreatorQrOverlayPosition} from "@/hooks/useCreatorQrOverlayPosition";
 
 type FetchStatus = "loading" | "ready" | "not_found" | "fetch_error";
 type VerificationStatus = "idle" | "verifying" | "verified" | "failed";
@@ -37,6 +38,7 @@ export function PublicImageView({
     initialViewUrl ? "verifying" : "idle",
   );
   const [verifiedUserId, setVerifiedUserId] = useState<number | null>(null);
+  const qrOverlayPosition = useCreatorQrOverlayPosition(verifiedUserId);
   const fetchInflightRef = useRef(false);
   const skipNextFetchRef = useRef(Boolean(initialViewUrl) || initialError?.status === 404);
 
@@ -157,6 +159,7 @@ export function PublicImageView({
             mediaKind="image"
             mediaId={imageId}
             enabled={fetchStatus === "ready"}
+            position={qrOverlayPosition}
           />
         )}
 

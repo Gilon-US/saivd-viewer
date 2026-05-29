@@ -1,7 +1,9 @@
 import {NextResponse} from "next/server";
 import {createClient} from "@/utils/supabase/server";
+import {isQrOverlayPosition} from "@/lib/presentation-qr/position";
 
-const PROFILE_COLUMNS = "id, email, display_name, role, created_at, updated_at";
+const PROFILE_COLUMNS =
+  "id, email, display_name, qr_overlay_position, role, created_at, updated_at";
 
 export async function GET() {
   const supabase = await createClient();
@@ -29,7 +31,10 @@ export async function PUT(request: Request) {
   } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({success: false, error: "Auth required"}, {status: 401});
 
-  const body = (await request.json()) as {display_name?: string | null};
+  const body = (await request.json()) as {
+    display_name?: string | null;
+    qr_overlay_position?: string;
+  };
   const updates: Record<string, unknown> = {};
   if (typeof body.display_name === "string") {
     if (body.display_name.length < 2 || body.display_name.length > 50) {
@@ -39,6 +44,12 @@ export async function PUT(request: Request) {
       );
     }
     updates.display_name = body.display_name;
+  }
+  if (body.qr_overlay_position !== undefined) {
+    if (!isQrOverlayPosition(body.qr_overlay_position)) {
+      return NextResponse.json({success: false, error: "Invalid QR overlay position"}, {status: 400});
+    }
+    updates.qr_overlay_position = body.qr_overlay_position;
   }
   updates.updated_at = new Date().toISOString();
 

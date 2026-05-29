@@ -2,6 +2,7 @@
 
 import {LoadingSpinner} from "@/components/ui/loading-spinner";
 import {PresentationQrFlipButton} from "@/components/presentation/PresentationQrFlipButton";
+import {useCreatorQrOverlayPosition} from "@/hooks/useCreatorQrOverlayPosition";
 import {useImageWatermarkVerification} from "@/hooks/useImageWatermarkVerification";
 import {imageViewProxyUrl} from "@/lib/image-verification-url";
 
@@ -31,6 +32,7 @@ function verificationFailMessage(
 
 export function ImageLightbox({isOpen, imageId, filename, onClose}: ImageLightboxProps) {
   const verification = useImageWatermarkVerification(imageId, {enabled: isOpen});
+  const qrOverlayPosition = useCreatorQrOverlayPosition(verification.verifiedUserId);
   const displayUrl = imageViewProxyUrl(imageId);
 
   if (!isOpen) return null;
@@ -53,6 +55,7 @@ export function ImageLightbox({isOpen, imageId, filename, onClose}: ImageLightbo
             mediaKind="image"
             mediaId={imageId}
             enabled={isOpen}
+            position={qrOverlayPosition}
           />
         )}
 

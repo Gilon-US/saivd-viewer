@@ -31,6 +31,11 @@ export default function DashboardLayout({children}: DashboardLayoutProps) {
                   className="px-3 py-2 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700">
                   Dashboard
                 </Link>
+                <Link
+                  href="/dashboard/preferences"
+                  className="px-3 py-2 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700">
+                  Preferences
+                </Link>
                 {isStaff && (
                   <Link
                     href="/dashboard/settings"

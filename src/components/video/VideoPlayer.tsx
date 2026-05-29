@@ -5,6 +5,7 @@ import {X, Play, Pause, Volume2, VolumeX, Maximize} from "lucide-react";
 import {useWatermarkVerification, type VerificationProgress, type VerificationProgressPhase} from "@/hooks/useWatermarkVerification";
 import {LoadingSpinner} from "@/components/ui/loading-spinner";
 import {PresentationQrFlipButton} from "@/components/presentation/PresentationQrFlipButton";
+import {useCreatorQrOverlayPosition} from "@/hooks/useCreatorQrOverlayPosition";
 
 interface VideoPlayerProps {
   videoUrl: string;
@@ -73,6 +74,7 @@ export function VideoPlayer({
 
   // Presentation QR from verified creator numeric user ID.
   const presentationNumericId = verifiedUserId ? Number(verifiedUserId) : null;
+  const qrOverlayPosition = useCreatorQrOverlayPosition(presentationNumericId);
 
   // Diagnostic: src is always set now; verification no longer blocks playback start.
   const videoSrcWithheld = false;
@@ -236,7 +238,9 @@ export function VideoPlayer({
               numericUserId={presentationNumericId}
               mediaKind="video"
               mediaId={videoId}
-              enabled={isOpen && isPlaying}
+              enabled={isOpen && !isPlaybackBlocked}
+              position={qrOverlayPosition}
+              elevateAboveBottomControls
             />
           )}
 
