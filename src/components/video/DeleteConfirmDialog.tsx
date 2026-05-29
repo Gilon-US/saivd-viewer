@@ -9,15 +9,19 @@ type DeleteConfirmDialogProps = {
   onConfirm: () => void;
   videoFilename: string;
   isDeleting?: boolean;
+  mediaKind?: "video" | "image";
 };
 
-export function DeleteConfirmDialog({ 
-  isOpen, 
-  onClose, 
-  onConfirm, 
+export function DeleteConfirmDialog({
+  isOpen,
+  onClose,
+  onConfirm,
   videoFilename,
-  isDeleting = false 
+  isDeleting = false,
+  mediaKind = "video",
 }: DeleteConfirmDialogProps) {
+  const label = mediaKind === "image" ? "Image" : "Video";
+  const labelLower = label.toLowerCase();
   if (!isOpen) {
     return null;
   }
@@ -27,7 +31,7 @@ export function DeleteConfirmDialog({
       <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg w-full max-w-md">
         <div className="flex items-center justify-between p-4 border-b">
           <h2 className="text-xl font-semibold text-red-600 dark:text-red-400">
-            Delete Video
+            Delete {label}
           </h2>
           <Button variant="ghost" size="icon" onClick={onClose} disabled={isDeleting}>
             <XIcon className="h-5 w-5" />
@@ -39,13 +43,13 @@ export function DeleteConfirmDialog({
             <AlertTriangleIcon className="h-6 w-6 text-red-500 flex-shrink-0 mt-0.5" />
             <div>
               <h3 className="text-lg font-medium mb-2">
-                Are you sure you want to delete this video?
+                Are you sure you want to delete this {labelLower}?
               </h3>
               <p className="text-gray-600 dark:text-gray-300 mb-2">
                 <strong>&ldquo;{videoFilename}&rdquo;</strong>
               </p>
               <p className="text-sm text-gray-500 dark:text-gray-400">
-                This action cannot be undone. The video file will be permanently deleted from storage and removed from your account.
+                This action cannot be undone. The {labelLower} file will be permanently deleted from storage and removed from your account.
               </p>
             </div>
           </div>
@@ -63,7 +67,7 @@ export function DeleteConfirmDialog({
               onClick={onConfirm}
               disabled={isDeleting}
             >
-              {isDeleting ? 'Deleting...' : 'Delete Video'}
+              {isDeleting ? "Deleting..." : `Delete ${label}`}
             </Button>
           </div>
         </div>

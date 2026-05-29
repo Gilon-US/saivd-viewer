@@ -2,8 +2,8 @@ import {Metadata} from "next";
 import {ReactNode} from "react";
 
 export const metadata: Metadata = {
-  title: "Claim video | SAIVD Viewer",
-  description: "Claim a video shared with you by a SAIVD creator.",
+  title: "Claim media | SAIVD Viewer",
+  description: "Claim a video or image shared with you by a SAIVD creator.",
   robots: {
     index: false,
     follow: false,

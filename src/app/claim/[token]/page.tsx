@@ -8,6 +8,8 @@ import {LoadingSpinner} from "@/components/ui/loading-spinner";
 import {Button} from "@/components/ui/button";
 import {useAuth} from "@/contexts/AuthContext";
 import {useVideoUpload} from "@/hooks/useVideoUpload";
+import {useImageUpload} from "@/hooks/useImageUpload";
+import {isImageTransfer, isVideoTransfer} from "@/lib/transfer-media";
 
 /**
  * Claim page for the cross-app transfer feature.
@@ -26,7 +28,7 @@ import {useVideoUpload} from "@/hooks/useVideoUpload";
  *           verification path is identical.
  *        c. After useVideoUpload reports success, POST /api/claim/transfers/<token>/mark-claimed
  *           (proxy) to invalidate the token on the creator app.
- *        d. Redirect to /dashboard/videos.
+ *        d. Redirect to /dashboard/videos or /dashboard/images.
  *
  * The token never touches the viewer's database. The viewer never holds creator
  * DB credentials. All cross-app communication is HTTPS to creator's public,
@@ -43,11 +45,20 @@ type TransferMetadata = {
 type FetchStatus = "loading" | "ready" | "not_found" | "fetch_error";
 type ClaimStatus = "idle" | "downloading" | "uploading" | "finalizing" | "claimed" | "failed";
 
+type ClaimMediaKind = "video" | "image" | "unknown";
+
+function resolveMediaKind(metadata: TransferMetadata): ClaimMediaKind {
+  if (isImageTransfer(metadata.content_type, metadata.filename)) return "image";
+  if (isVideoTransfer(metadata.content_type, metadata.filename)) return "video";
+  return "unknown";
+}
+
 export default function ClaimPage({params}: {params: Promise<{token: string}>}) {
   const {token} = use(params);
   const router = useRouter();
   const {user, loading: authLoading} = useAuth();
   const {uploadVideo} = useVideoUpload();
+  const {uploadImage} = useImageUpload();
 
   const [fetchStatus, setFetchStatus] = useState<FetchStatus>("loading");
   const [fetchError, setFetchError] = useState<string | null>(null);
@@ -171,12 +182,17 @@ export default function ClaimPage({params}: {params: Promise<{token: string}>}) 
         lastModified: Date.now(),
       });
 
-      // 3. Hand off to the existing upload flow. This: generates a thumbnail,
-      //    requests a presigned PUT URL from /api/videos/upload, uploads to
-      //    the viewer's Wasabi bucket, calls /api/videos/confirm to insert
-      //    the videos row (auto UUID).
+      const mediaKind = resolveMediaKind(metadata);
+      if (mediaKind === "unknown") {
+        throw new Error("This transfer is not a supported video or image type.");
+      }
+
       setClaimStatus("uploading");
-      await uploadVideo(file);
+      if (mediaKind === "image") {
+        await uploadImage(file);
+      } else {
+        await uploadVideo(file);
+      }
 
       // 4. Tell the creator the token is spent. Best-effort — if this fails
       //    we still consider the claim successful from the viewer's POV; the
@@ -193,13 +209,13 @@ export default function ClaimPage({params}: {params: Promise<{token: string}>}) 
 
       setClaimStatus("claimed");
 
-      // 5. Send the user to their library where the new video shows up.
-      window.setTimeout(() => router.push("/dashboard/videos"), 1500);
+      const dashboardPath = mediaKind === "image" ? "/dashboard/images" : "/dashboard/videos";
+      window.setTimeout(() => router.push(dashboardPath), 1500);
     } catch (err) {
       setClaimError(err instanceof Error ? err.message : "Claim failed");
       setClaimStatus("failed");
     }
-  }, [metadata, token, uploadVideo, router]);
+  }, [metadata, token, uploadVideo, uploadImage, router]);
 
   // ---- Render ----------------------------------------------------------------
 
@@ -257,13 +273,18 @@ export default function ClaimPage({params}: {params: Promise<{token: string}>}) 
   const sizeMb = metadata ? (metadata.size / (1024 * 1024)).toFixed(1) : "";
   const expiryLabel = expiresAt ? new Date(expiresAt).toLocaleString() : "";
   const isWorking = claimStatus === "downloading" || claimStatus === "uploading" || claimStatus === "finalizing";
+  const mediaKind = metadata ? resolveMediaKind(metadata) : "video";
+  const isImage = mediaKind === "image";
+  const mediaLabel = isImage ? "Image" : "Video";
+  const mediaLabelLower = mediaLabel.toLowerCase();
+  const libraryLabel = isImage ? "images" : "videos";
 
   return (
     <main className="flex min-h-screen items-center justify-center px-4 py-12">
       <div className="max-w-md w-full rounded-lg border bg-white dark:bg-gray-800 p-6 shadow">
-        <h1 className="text-2xl font-semibold mb-2">Video shared with you</h1>
+        <h1 className="text-2xl font-semibold mb-2">{mediaLabel} shared with you</h1>
         <p className="text-sm text-gray-600 dark:text-gray-400 mb-6">
-          A SAIVD creator has shared a video with you. Claim it to add a copy to your own SAIVD Viewer library.
+          A SAIVD creator has shared a {mediaLabelLower} with you. Claim it to add a copy to your own SAIVD Viewer library.
         </p>
 
         {metadata && (
@@ -284,7 +305,7 @@ export default function ClaimPage({params}: {params: Promise<{token: string}>}) 
           <div className="rounded-md border border-green-300 bg-green-50 dark:bg-green-900/20 dark:border-green-800 p-4 flex items-start gap-2">
             <CheckCircle2Icon className="h-5 w-5 text-green-600 flex-shrink-0 mt-0.5" />
             <div className="text-sm text-green-700 dark:text-green-300">
-              Claimed! Redirecting to your videos…
+              Claimed! Redirecting to your {libraryLabel}…
             </div>
           </div>
         ) : claimStatus === "failed" ? (
@@ -311,12 +332,12 @@ export default function ClaimPage({params}: {params: Promise<{token: string}>}) 
               ) : (
                 <>
                   <DownloadIcon className="mr-2 h-4 w-4" />
-                  Claim video
+                  Claim {mediaLabelLower}
                 </>
               )}
             </Button>
             <p className="text-xs text-gray-500 dark:text-gray-400 mt-3 text-center">
-              The video will be copied to your account. The original stays with the creator.
+              The {mediaLabelLower} will be copied to your account. The original stays with the creator.
             </p>
           </>
         )}

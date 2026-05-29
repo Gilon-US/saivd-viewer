@@ -44,5 +44,7 @@ export const WASABI_BUCKET = process.env.WASABI_BUCKET_NAME!;
 
 // Constants for file upload limits
 export const MAX_FILE_SIZE = 500 * 1024 * 1024; // 500MB
+export const MAX_IMAGE_SIZE = 50 * 1024 * 1024; // 50MB
 export const ALLOWED_VIDEO_TYPES = ['video/mp4', 'video/quicktime', 'video/x-msvideo', 'video/webm'];
+export const ALLOWED_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/jpg', 'image/webp'];
 export const URL_EXPIRATION_SECONDS = 3600; // 1 hour

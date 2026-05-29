@@ -3,17 +3,14 @@ import {NextRequest, NextResponse} from "next/server";
 const APP_URL =
   process.env.NEXT_PUBLIC_APP_URL ?? "https://viewer.saivd.io";
 
+type ParsedSaivdUrl = {kind: "video"; id: string} | {kind: "image"; id: string};
+
 /**
- * oEmbed provider for SAIVD video URLs.
+ * oEmbed provider for SAIVD video and image URLs.
  * Spec: https://oembed.com/
  *
- * Accepts:  GET /api/oembed?url=<https://viewer.saivd.io/v/{id}>&format=json[&maxwidth=NNN&maxheight=NNN]
- * Returns:  oEmbed JSON of type "video" with HTML containing the iframe to /embed/[id].
- *
- * Does NOT verify that the video exists in the database — the verification
- * happens when the embed iframe loads /api/public/videos/[id]/play. We just
- * validate URL shape so we can respond fast and not consume DB resources for
- * crawler/bot oEmbed lookups.
+ * Accepts:
+ *   GET /api/oembed?url=<https://viewer.saivd.io/v/{id}|/i/{id}|/embed/...>&format=json
  */
 export async function GET(req: NextRequest) {
   const url = req.nextUrl.searchParams.get("url");
@@ -29,20 +26,34 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({error: "Missing url parameter"}, {status: 400});
   }
 
-  const videoId = parseSaivdVideoUrl(url);
-  if (!videoId) {
+  const parsed = parseSaivdUrl(url);
+  if (!parsed) {
     return NextResponse.json({error: "Unsupported URL"}, {status: 404});
   }
 
-  const {width, height} = fitToBox(maxwidth, maxheight, 16 / 9);
-  const embedUrl = `${APP_URL}/embed/${videoId}`;
+  if (parsed.kind === "image") {
+    const {width, height} = fitToBox(maxwidth, maxheight, 1);
+    const embedUrl = `${APP_URL}/embed/i/${parsed.id}`;
+    const html =
+      `<div style="width:100%;max-width:100%;margin:0 auto;">` +
+      `<iframe src="${embedUrl}" ` +
+      `style="width:100%;aspect-ratio:1/1;border:0;display:block;" ` +
+      `allow="fullscreen" allowfullscreen ` +
+      `loading="lazy" referrerpolicy="strict-origin-when-cross-origin" ` +
+      `title="SAIVD verified image"></iframe>` +
+      `</div>`;
 
-  // Wrapper div + responsive iframe. The wrapper is needed because some builder
-  // products (Hostinger Website Builder mobile theme, certain Wix layouts, some
-  // Squarespace blocks) interpret bare iframe width/height attributes as fixed
-  // pixel hints on mobile, fighting the responsive CSS. The div forces those
-  // builders to size by container width, and the iframe inside fills it via
-  // aspect-ratio:16/9 (supported in all browsers since late 2021).
+    return oembedJson({
+      type: "rich",
+      title: "Verified image — SAIVD",
+      html,
+      width,
+      height,
+    });
+  }
+
+  const {width, height} = fitToBox(maxwidth, maxheight, 16 / 9);
+  const embedUrl = `${APP_URL}/embed/${parsed.id}`;
   const html =
     `<div style="width:100%;max-width:100%;margin:0 auto;">` +
     `<iframe src="${embedUrl}" ` +
@@ -52,28 +63,13 @@ export async function GET(req: NextRequest) {
     `title="SAIVD verified video"></iframe>` +
     `</div>`;
 
-  return NextResponse.json(
-    {
-      type: "video",
-      version: "1.0",
-      provider_name: "SAIVD",
-      provider_url: APP_URL,
-      title: "Verified video — SAIVD",
-      html,
-      width,
-      height,
-      thumbnail_url: `${APP_URL}/images/saivd-logo.png`,
-      thumbnail_width: 1200,
-      thumbnail_height: 630,
-    },
-    {
-      headers: {
-        "Cache-Control": "public, s-maxage=3600, max-age=3600",
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Methods": "GET, OPTIONS",
-      },
-    }
-  );
+  return oembedJson({
+    type: "video",
+    title: "Verified video — SAIVD",
+    html,
+    width,
+    height,
+  });
 }
 
 export async function OPTIONS() {
@@ -86,13 +82,50 @@ export async function OPTIONS() {
   });
 }
 
-function parseSaivdVideoUrl(input: string): string | null {
+function oembedJson(payload: {
+  type: "video" | "rich";
+  title: string;
+  html: string;
+  width: number;
+  height: number;
+}) {
+  return NextResponse.json(
+    {
+      type: payload.type,
+      version: "1.0",
+      provider_name: "SAIVD",
+      provider_url: APP_URL,
+      title: payload.title,
+      html: payload.html,
+      width: payload.width,
+      height: payload.height,
+      thumbnail_url: `${APP_URL}/images/saivd-logo.png`,
+      thumbnail_width: 1200,
+      thumbnail_height: 630,
+    },
+    {
+      headers: {
+        "Cache-Control": "public, s-maxage=3600, max-age=3600",
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "GET, OPTIONS",
+      },
+    },
+  );
+}
+
+function parseSaivdUrl(input: string): ParsedSaivdUrl | null {
   try {
     const u = new URL(input);
     const expected = new URL(APP_URL).host;
     if (u.host !== expected) return null;
-    const m = u.pathname.match(/^\/(?:v|embed)\/([a-zA-Z0-9-]+)\/?$/);
-    return m ? m[1] : null;
+
+    const videoMatch = u.pathname.match(/^\/(?:v|embed)\/([a-zA-Z0-9-]+)\/?$/);
+    if (videoMatch) return {kind: "video", id: videoMatch[1]};
+
+    const imageMatch = u.pathname.match(/^\/(?:i|embed\/i)\/([a-zA-Z0-9-]+)\/?$/);
+    if (imageMatch) return {kind: "image", id: imageMatch[1]};
+
+    return null;
   } catch {
     return null;
   }
