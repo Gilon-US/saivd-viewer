@@ -1,6 +1,7 @@
 import {NextRequest, NextResponse} from "next/server";
 import {createClient} from "@/utils/supabase/server";
 import {generatePresignedVideoUrl, extractKeyFromUrl} from "@/lib/wasabi-urls";
+import {resolveWatermarkedStorageKey} from "@/lib/video-playback-url";
 
 /**
  * GET /api/videos/[id]/play
@@ -21,6 +22,7 @@ export async function GET(request: NextRequest, context: {params: Promise<{id: s
     const {id: videoId} = await context.params;
     const {searchParams} = new URL(request.url);
     const variant = searchParams.get("variant") || "original";
+    const wantsRedirect = searchParams.get("redirect") === "1";
 
     // Validate variant parameter
     if (variant !== "original" && variant !== "watermarked") {
@@ -52,16 +54,11 @@ export async function GET(request: NextRequest, context: {params: Promise<{id: s
       return NextResponse.json({success: false, error: {code: "not_found", message: "Video not found"}}, {status: 404});
     }
 
-    // Determine the object key based on variant
     let key: string | null = null;
 
     if (variant === "watermarked") {
-      // For watermarked variant:
-      // 1. Prefer processed_url if it exists (for videos that were processed after upload)
-      // 2. Fall back to original_url (since in this app, uploaded videos are already watermarked)
-      const watermarkedUrl = video.processed_url || video.original_url;
-      
-      if (!watermarkedUrl) {
+      key = resolveWatermarkedStorageKey(video);
+      if (!key) {
         return NextResponse.json(
           {
             success: false,
@@ -70,19 +67,15 @@ export async function GET(request: NextRequest, context: {params: Promise<{id: s
           {status: 400}
         );
       }
-
-      if (watermarkedUrl.startsWith("http")) {
-        key = extractKeyFromUrl(watermarkedUrl);
-      } else {
-        key = watermarkedUrl;
-      }
     } else {
-      // For original variant, use original_url
-      if (video.original_url?.startsWith("http")) {
-        key = extractKeyFromUrl(video.original_url);
-      } else {
-        key = video.original_url;
+      const originalUrl = video.original_url;
+      if (!originalUrl) {
+        return NextResponse.json(
+          {success: false, error: {code: "invalid_data", message: "Missing or invalid video storage key"}},
+          {status: 500},
+        );
       }
+      key = originalUrl.startsWith("http") ? extractKeyFromUrl(originalUrl) : originalUrl;
     }
 
     if (!key) {
@@ -94,6 +87,10 @@ export async function GET(request: NextRequest, context: {params: Promise<{id: s
 
     // Generate a presigned URL from the key so that objects can remain private in Wasabi.
     const playbackUrl = await generatePresignedVideoUrl(key);
+
+    if (wantsRedirect) {
+      return NextResponse.redirect(playbackUrl, 307);
+    }
 
     // Debug: log what we are returning to the client
     console.log("Playback URL generated:", {

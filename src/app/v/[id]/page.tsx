@@ -1,5 +1,5 @@
 import type {Metadata} from "next";
-import {PublicVideoView} from "./_view";
+import {PublicVideoPageContent} from "@/components/video/PublicVideoPageContent";
 import {getPublicPlaybackData} from "@/lib/playback-url";
 
 const APP_URL =
@@ -80,11 +80,5 @@ export default async function PublicVideoPage({params}: {params: Promise<Params>
   const {id} = await params;
   const result = await getPublicPlaybackData(id, "watermarked");
 
-  return (
-    <PublicVideoView
-      videoId={id}
-      initialPlaybackUrl={result.ok ? result.playbackUrl : null}
-      initialError={result.ok ? null : {code: result.code, message: result.message, status: result.status}}
-    />
-  );
+  return <PublicVideoPageContent videoId={id} result={result} />;
 }

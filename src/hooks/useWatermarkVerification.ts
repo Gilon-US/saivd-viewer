@@ -10,7 +10,10 @@ import {
   getFrameYFromWasm,
   prewarmWasmVerificationSession,
   scheduleDisposeWasmVerificationSession,
+  WASM_SESSION_KEEPALIVE_MS,
 } from "@/lib/wasm-watermark-verification-client";
+import {isParallelKeyFetchEnabled} from "@/lib/video-perf-flags";
+import {flushVideoBeacon, markVideo, type VideoVerifyPhase} from "@/lib/perf/video-verify-marks";
 
 export type WatermarkVerificationStatus = "idle" | "verifying" | "verified" | "failed";
 export type VerificationProgressPhase =
@@ -30,11 +33,12 @@ export type VerificationProgress = {
 
 type UseWatermarkVerificationOptions = {
   enabled: boolean;
+  videoId?: string | null;
   onVerificationComplete?: (status: "verified" | "failed", userId: string | null) => void;
   onVerificationProgress?: (progress: VerificationProgress) => void;
 };
 
-const SESSION_KEEPALIVE_TTL_MS = 45000;
+const SESSION_KEEPALIVE_TTL_MS = WASM_SESSION_KEEPALIVE_MS;
 
 /** sessionStorage cache of creator public keys to avoid refetching across video plays.
  *  Keys are public-by-design; sessionStorage scope is per-tab and clears on close.
@@ -135,7 +139,7 @@ export function useWatermarkVerification(
   videoUrl: string | null,
   options: UseWatermarkVerificationOptions
 ) {
-  const {enabled, onVerificationComplete, onVerificationProgress} = options;
+  const {enabled, videoId, onVerificationComplete, onVerificationProgress} = options;
   const [status, setStatus] = useState<WatermarkVerificationStatus>("idle");
   const [verifiedUserId, setVerifiedUserId] = useState<string | null>(null);
   const publicKeyRef = useRef<CryptoKey | null>(null);
@@ -170,6 +174,9 @@ export function useWatermarkVerification(
       return;
     }
     lastProgressRef.current = {phase, detail};
+    if (videoId && phase !== "prewarm") {
+      markVideo(videoId, phase as VideoVerifyPhase);
+    }
     onVerificationProgressRef.current?.({phase, detail, ts: Date.now()});
   };
 
@@ -246,6 +253,8 @@ export function useWatermarkVerification(
         height: number;
       }> = [];
       let strongFrame0Candidate: (typeof candidates)[number] | null = null;
+      let parallelKeyPromise: Promise<string> | null = null;
+      let parallelKeyUserId: number | null = null;
 
       for (const frameIndex of frameIndexes) {
         emitProgress("frame_decode", `Checking watermark on frame ${frameIndex}`);
@@ -296,6 +305,14 @@ export function useWatermarkVerification(
             height: wasmY.height,
           };
           candidates.push(candidate);
+          if (
+            isParallelKeyFetchEnabled() &&
+            !parallelKeyPromise &&
+            diagnostics.numericUserId !== null
+          ) {
+            parallelKeyUserId = diagnostics.numericUserId;
+            parallelKeyPromise = fetchPublicKeyPemFromSaivd(diagnostics.numericUserId);
+          }
           if (frameIndex === 0 && diagnostics.bestScore === 0 && diagnostics.repsUsed >= 4) {
             strongFrame0Candidate = candidate;
             console.log("[Frame0Decode] Strong frame0 candidate short-circuit", {
@@ -359,6 +376,10 @@ export function useWatermarkVerification(
           videoUrl?.slice(-80)
         );
         console.log("[Frame0Decode] Verification finished", { status: "failed", elapsedMs: Math.round(performance.now() - verifyStartTime) });
+        if (videoId) {
+          markVideo(videoId, "verify_end");
+          flushVideoBeacon(videoId, {outcome: "failed", elapsedMs: Math.round(performance.now() - verifyStartTime)});
+        }
         if (mounted) setStatus("failed");
         if (mounted && !callbackFiredRef.current && onVerificationCompleteRef.current) {
           callbackFiredRef.current = true;
@@ -377,7 +398,11 @@ export function useWatermarkVerification(
       let pem: string | null = null;
       try {
         debugLog("Fetching public key PEM", {numericUserId});
-        pem = await fetchPublicKeyPemFromSaivd(numericUserId);
+        if (parallelKeyPromise && parallelKeyUserId === numericUserId) {
+          pem = await parallelKeyPromise;
+        } else {
+          pem = await fetchPublicKeyPemFromSaivd(numericUserId);
+        }
         debugLog("Fetched public key PEM length", {length: pem.length});
       } catch (e) {
         debugLog("Fetch public key failed (non-blocking)", e);
@@ -420,7 +445,10 @@ export function useWatermarkVerification(
       emitProgress("finalizing", "Final checks");
       const elapsed = Math.round(performance.now() - verifyStartTime);
       console.log("[Frame0Decode] Verification finished", { status: "verified", elapsedMs: elapsed });
-      console.log("[Frame0Decode] Full video loads only after this (when <video> src is set). Verification used Range requests + WASM decode.");
+      if (videoId) {
+        markVideo(videoId, "verify_end");
+        flushVideoBeacon(videoId, {outcome: "verified", elapsedMs: elapsed});
+      }
       verifiedFrameIndicesRef.current = new Set([0]);
       setVerifiedUserId(String(numericUserId));
       setStatus("verified");

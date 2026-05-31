@@ -1,11 +1,16 @@
 "use client";
 
-import {useEffect, useRef, useState} from "react";
+import {useEffect, useLayoutEffect, useRef, useState} from "react";
 import {X, Play, Pause, Volume2, VolumeX, Maximize} from "lucide-react";
 import {useWatermarkVerification, type VerificationProgress, type VerificationProgressPhase} from "@/hooks/useWatermarkVerification";
 import {LoadingSpinner} from "@/components/ui/loading-spinner";
 import {PresentationQrFlipButton} from "@/components/presentation/PresentationQrFlipButton";
 import {useCreatorQrOverlayPosition} from "@/hooks/useCreatorQrOverlayPosition";
+import {ssrVideoSelector} from "@/lib/video-playback-url";
+import {
+  getVideoElementPlaybackPlan,
+  type PlaybackContext,
+} from "@/lib/video-perf-flags";
 
 interface VideoPlayerProps {
   videoUrl: string;
@@ -18,6 +23,10 @@ interface VideoPlayerProps {
   onVerificationComplete?: (status: "verified" | "failed", userId: string | null) => void;
   /** When true, render inline (fills parent) and hide the modal close button. Used by /embed/[id]. */
   embedded?: boolean;
+  /** When true, bind to server-rendered `<video data-saivd-public-video>` in PublicVideoShell. */
+  ssrVideo?: boolean;
+  playbackContext?: PlaybackContext;
+  contentLengthBytes?: number | null;
 }
 
 export function VideoPlayer({
@@ -30,8 +39,10 @@ export function VideoPlayer({
   verifiedUserId,
   onVerificationComplete,
   embedded = false,
+  ssrVideo = false,
+  playbackContext = "public",
+  contentLengthBytes = null,
 }: VideoPlayerProps) {
-  void videoId;
   const videoRef = useRef<HTMLVideoElement>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
@@ -39,6 +50,7 @@ export function VideoPlayer({
   const [duration, setDuration] = useState(0);
   const [verificationProgress, setVerificationProgress] = useState<VerificationProgress | null>(null);
   const [microcopyIndex, setMicrocopyIndex] = useState(0);
+  const [ssrVideoBound, setSsrVideoBound] = useState(false);
 
   // Allow playback while verification runs; block only on verification failure.
   const isVerificationInProgress = verificationStatus === "verifying";
@@ -57,9 +69,83 @@ export function VideoPlayer({
   });
   useWatermarkVerification(videoRef, videoUrl ?? null, {
     enabled: verificationEnabled,
+    videoId,
     onVerificationComplete,
     onVerificationProgress: setVerificationProgress,
   });
+
+  const playbackPlan = getVideoElementPlaybackPlan({
+    videoUrl,
+    context: playbackContext,
+    contentLengthBytes,
+    verificationStatus,
+    playRequested: true,
+  });
+
+  useEffect(() => {
+    if (!isOpen || isPlaybackBlocked || !playbackPlan.src) return;
+    if (ssrVideo && !ssrVideoBound) return;
+    const video = videoRef.current;
+    if (!video) return;
+
+    let cancelled = false;
+
+    const startPlayback = async () => {
+      if (cancelled || isPlaybackBlocked) return;
+      try {
+        await video.play();
+        if (!cancelled) setIsPlaying(true);
+        return;
+      } catch {
+        // Autoplay policies often require muted playback without a fresh user gesture.
+      }
+      if (cancelled) return;
+      video.muted = true;
+      setIsMuted(true);
+      try {
+        await video.play();
+        if (!cancelled) setIsPlaying(true);
+      } catch {
+        // User can still press play; leave controls visible.
+      }
+    };
+
+    if (video.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA) {
+      void startPlayback();
+    } else {
+      video.addEventListener("canplay", startPlayback, {once: true});
+    }
+
+    return () => {
+      cancelled = true;
+      video.removeEventListener("canplay", startPlayback);
+    };
+  }, [isOpen, isPlaybackBlocked, playbackPlan.src, videoUrl, ssrVideo, ssrVideoBound]);
+
+  useEffect(() => {
+    if (!ssrVideo || !videoRef.current) return;
+    const video = videoRef.current;
+    if (playbackPlan.src) {
+      if (video.getAttribute("src") !== playbackPlan.src) {
+        video.src = playbackPlan.src;
+      }
+    } else {
+      video.removeAttribute("src");
+    }
+    video.preload = playbackPlan.preload;
+  }, [ssrVideo, playbackPlan.src, playbackPlan.preload]);
+
+  useLayoutEffect(() => {
+    if (!ssrVideo || !videoId || !isOpen) {
+      setSsrVideoBound(false);
+      return;
+    }
+    const el = document.querySelector(ssrVideoSelector(videoId));
+    if (el instanceof HTMLVideoElement) {
+      videoRef.current = el;
+      setSsrVideoBound(true);
+    }
+  }, [ssrVideo, videoId, isOpen, videoUrl]);
 
   useEffect(() => {
     if (verificationStatus !== "verifying") {
@@ -76,18 +162,15 @@ export function VideoPlayer({
   const presentationNumericId = verifiedUserId ? Number(verifiedUserId) : null;
   const qrOverlayPosition = useCreatorQrOverlayPosition(presentationNumericId);
 
-  // Diagnostic: src is always set now; verification no longer blocks playback start.
-  const videoSrcWithheld = false;
+  // Diagnostic: playback plan (src always attached; verify-first may use metadata preload).
   useEffect(() => {
     console.log("[Frame0Decode] Video element src", {
-      withheld: videoSrcWithheld,
-      reason: videoSrcWithheld
-        ? "verification pending or failed – video has no src (no full load)"
-        : "playback allowed – src set",
+      withheld: playbackPlan.srcWithheld,
+      preload: playbackPlan.preload,
       verificationStatus,
       t: Math.round(performance.now()),
     });
-  }, [videoSrcWithheld, verificationStatus]);
+  }, [playbackPlan.srcWithheld, playbackPlan.preload, verificationStatus]);
 
   useEffect(() => {
     if (!isOpen) {
@@ -151,6 +234,29 @@ export function VideoPlayer({
     }
   };
 
+  useEffect(() => {
+    if (!ssrVideo || !isOpen) return;
+    const video = videoRef.current;
+    if (!video) return;
+
+    const onTimeUpdate = () => setCurrentTime(video.currentTime);
+    const onLoadedMetadata = () => setDuration(video.duration);
+    const onEnded = () => setIsPlaying(false);
+
+    video.addEventListener("timeupdate", onTimeUpdate);
+    video.addEventListener("loadedmetadata", onLoadedMetadata);
+    video.addEventListener("ended", onEnded);
+    if (video.readyState >= 1) {
+      onLoadedMetadata();
+    }
+
+    return () => {
+      video.removeEventListener("timeupdate", onTimeUpdate);
+      video.removeEventListener("loadedmetadata", onLoadedMetadata);
+      video.removeEventListener("ended", onEnded);
+    };
+  }, [ssrVideo, isOpen, videoId, videoUrl]);
+
   const toggleFullscreen = () => {
     if (videoRef.current) {
       if (document.fullscreenElement) {
@@ -174,36 +280,54 @@ export function VideoPlayer({
 
   if (!isOpen) return null;
 
+  const overlayMode = ssrVideo;
+
   return (
     <div
       className={
-        embedded
-          ? "relative w-full h-full bg-black"
-          : "fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-2 sm:p-4"
+        overlayMode
+          ? embedded
+            ? "absolute inset-0 z-10"
+            : "absolute inset-0 z-10"
+          : embedded
+            ? "relative w-full h-full bg-black"
+            : "fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-2 sm:p-4"
       }>
-      <div className={embedded ? "relative w-full h-full" : "relative w-full max-w-5xl"}>
+      <div className={overlayMode || embedded ? "relative w-full h-full" : "relative w-full max-w-5xl"}>
         {!embedded && (
           <button
             onClick={onClose}
-            className="absolute -top-10 sm:-top-12 right-0 sm:right-2 text-white hover:text-gray-300 transition-colors touch-manipulation z-30"
+            className={
+              overlayMode
+                ? "absolute top-2 right-2 sm:top-4 sm:right-4 text-white hover:text-gray-300 transition-colors touch-manipulation z-30"
+                : "absolute -top-10 sm:-top-12 right-0 sm:right-2 text-white hover:text-gray-300 transition-colors touch-manipulation z-30"
+            }
             aria-label="Close video player">
             <X className="w-6 h-6 sm:w-8 sm:h-8" />
           </button>
         )}
 
         {/* Video container */}
-        <div className="relative bg-black rounded-lg overflow-hidden">
-          <video
-            ref={videoRef}
-            src={videoUrl}
-            playsInline
-            crossOrigin="anonymous"
-            className="w-full aspect-video"
-            onTimeUpdate={handleTimeUpdate}
-            onLoadedMetadata={handleLoadedMetadata}
-            onEnded={() => setIsPlaying(false)}
-            controls={false}
-          />
+        <div
+          className={
+            overlayMode
+              ? "relative w-full h-full"
+              : "relative bg-black rounded-lg overflow-hidden"
+          }>
+          {!ssrVideo && (
+            <video
+              ref={videoRef}
+              src={playbackPlan.src}
+              playsInline
+              crossOrigin="anonymous"
+              preload={playbackPlan.preload}
+              className={embedded ? "h-full w-full object-contain" : "w-full aspect-video"}
+              onTimeUpdate={handleTimeUpdate}
+              onLoadedMetadata={handleLoadedMetadata}
+              onEnded={() => setIsPlaying(false)}
+              controls={false}
+            />
+          )}
 
           {/* Verification overlay */}
           {isVerificationInProgress && (
@@ -356,8 +480,8 @@ function phaseMicrocopy(phase: VerificationProgressPhase | undefined, index: num
       "Almost done.",
     ],
     default: [
-      "Your video will play automatically once verification completes.",
-      "Thanks for waiting while we verify authenticity.",
+      "Verification runs while you watch.",
+      "Authenticity is checked in the background.",
     ],
   };
   const list = messages[phase ?? "default"];

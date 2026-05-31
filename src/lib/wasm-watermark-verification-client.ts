@@ -1,13 +1,18 @@
 /**
  * Lazy-loaded Web Worker + ffmpeg.wasm for watermark verification (Y plane) only.
- * Sessions are stateful per videoUrl; call disposeWasmVerificationSession when the player closes.
+ * Sessions are stateful per videoUrl; worker + ffmpeg stay warm across videos in-tab.
  */
+
+import {getMoovRangeSteps} from "@/lib/video-perf-flags";
 
 export type WasmFrameYResult = {
   yPlane: Uint8Array;
   width: number;
   height: number;
 };
+
+/** Keep worker/ffmpeg warm between player closes (tab lifetime disposal on beforeunload). */
+export const WASM_SESSION_KEEPALIVE_MS = 10 * 60 * 1000;
 
 type InitOk = {
   id: number;
@@ -17,6 +22,12 @@ type InitOk = {
   nbSamples: number;
   width: number;
   height: number;
+};
+
+type LoadFfmpegOk = {
+  id: number;
+  ok: true;
+  type: "loadFfmpeg";
 };
 
 type DecodeOk = {
@@ -30,7 +41,7 @@ type DecodeOk = {
 
 type DisposeOk = {id: number; ok: true; type: "dispose"};
 type ErrMsg = {id: number; ok: false; error: string};
-type OkMsg = InitOk | DecodeOk | DisposeOk;
+type OkMsg = InitOk | LoadFfmpegOk | DecodeOk | DisposeOk;
 
 let worker: Worker | null = null;
 let requestSeq = 0;
@@ -42,6 +53,8 @@ const pending = new Map<
 let activeUrl: string | null = null;
 let initMeta: {nbSamples: number; width: number; height: number} | null = null;
 let disposeTimer: ReturnType<typeof setTimeout> | null = null;
+let ffmpegPrewarmPromise: Promise<void> | null = null;
+let beforeUnloadRegistered = false;
 
 let sessionEnsureChain: Promise<void> = Promise.resolve();
 
@@ -100,8 +113,17 @@ function ensureWorker(): Worker {
   return worker;
 }
 
+function registerBeforeUnloadDispose(): void {
+  if (beforeUnloadRegistered || typeof window === "undefined") return;
+  beforeUnloadRegistered = true;
+  window.addEventListener("beforeunload", () => {
+    void disposeWasmVerificationSession();
+  });
+}
+
 function send<T extends OkMsg>(payload: Record<string, unknown>): Promise<T> {
   const w = ensureWorker();
+  registerBeforeUnloadDispose();
   const id = nextId();
   return new Promise((resolve, reject) => {
     pending.set(id, {
@@ -134,6 +156,7 @@ async function runEnsureWasmVerificationSessionLocked(
       type: "init",
       videoUrl,
       baseUrl: baseUrl(),
+      moovRangeSteps: getMoovRangeSteps(),
     });
     return applyInitOk(data);
   } catch {
@@ -142,9 +165,26 @@ async function runEnsureWasmVerificationSessionLocked(
       type: "init",
       videoUrl,
       baseUrl: baseUrl(),
+      moovRangeSteps: getMoovRangeSteps(),
     });
     return applyInitOk(data);
   }
+}
+
+/** Load ffmpeg.wasm inside the worker (no video demux). Safe to call early on route mount. */
+export async function prewarmFfmpegInWorker(): Promise<void> {
+  if (ffmpegPrewarmPromise) {
+    return ffmpegPrewarmPromise;
+  }
+  ffmpegPrewarmPromise = enqueueSessionEnsure(async () => {
+    await send<LoadFfmpegOk>({
+      type: "loadFfmpeg",
+      baseUrl: baseUrl(),
+    });
+  }).catch(() => {
+    ffmpegPrewarmPromise = null;
+  });
+  return ffmpegPrewarmPromise;
 }
 
 export async function ensureWasmVerificationSession(
@@ -157,6 +197,7 @@ export async function ensureWasmVerificationSession(
   if (activeUrl === videoUrl && initMeta) {
     return initMeta;
   }
+  await prewarmFfmpegInWorker();
   return enqueueSessionEnsure(() => runEnsureWasmVerificationSessionLocked(videoUrl));
 }
 
@@ -204,6 +245,7 @@ export async function disposeWasmVerificationSession(): Promise<void> {
   }
   activeUrl = null;
   initMeta = null;
+  ffmpegPrewarmPromise = null;
   const w = worker;
   if (!w) return;
   worker = null;

@@ -6,10 +6,11 @@ import type { ISOFile, Movie, MP4BoxBuffer, Sample } from "mp4box";
 import { extractYLumaFromYuv420pRaw } from "./yuv420-luma-extract";
 import { getFfmpegCoreUrls } from "./ffmpeg-verification-assets";
 
-const RANGE_STEPS_BYTES = [8 * 1024 * 1024, 16 * 1024 * 1024, 32 * 1024 * 1024];
+const RANGE_STEPS_BYTES_LEGACY = [8 * 1024 * 1024, 16 * 1024 * 1024, 32 * 1024 * 1024];
 
 type WorkerRequest =
-  | { id: number; type: "init"; videoUrl: string; baseUrl: string }
+  | { id: number; type: "init"; videoUrl: string; baseUrl: string; moovRangeSteps?: number[] }
+  | { id: number; type: "loadFfmpeg"; baseUrl: string }
   | { id: number; type: "decodeFrame"; frameIndex: number }
   | { id: number; type: "dispose" };
 
@@ -31,6 +32,7 @@ type WorkerResponse =
       width: number;
       height: number;
     }
+  | { id: number; ok: true; type: "loadFfmpeg" }
   | { id: number; ok: true; type: "dispose" }
   | { id: number; ok: false; error: string };
 
@@ -153,8 +155,8 @@ function concatUint8(a: Uint8Array, b: Uint8Array): Uint8Array {
   return o;
 }
 
-async function ensureMoovParsed(url: string, signal: AbortSignal): Promise<Movie> {
-  for (const byteCount of RANGE_STEPS_BYTES) {
+async function ensureMoovParsed(url: string, signal: AbortSignal, rangeSteps: number[]): Promise<Movie> {
+  for (const byteCount of rangeSteps) {
     if (signal.aborted) throw new DOMException("Aborted", "AbortError");
     mp4boxfile = createFile() as ISOFile;
     const file = mp4boxfile;
@@ -299,6 +301,14 @@ self.onmessage = async (ev: MessageEvent<WorkerRequest>) => {
       return;
     }
 
+    if (msg.type === "loadFfmpeg") {
+      baseUrlForFfmpeg = msg.baseUrl.replace(/\/$/, "");
+      await ensureFfmpegLoaded(baseUrlForFfmpeg);
+      const r: WorkerResponse = {id: msg.id, ok: true, type: "loadFfmpeg"};
+      self.postMessage(r);
+      return;
+    }
+
     if (msg.type === "init") {
       resetDemuxSession();
       videoUrl = msg.videoUrl;
@@ -306,8 +316,13 @@ self.onmessage = async (ev: MessageEvent<WorkerRequest>) => {
       abortController = new AbortController();
       const signal = abortController.signal;
 
+      const moovSteps =
+        msg.moovRangeSteps?.length && msg.moovRangeSteps.every((n) => n > 0)
+          ? msg.moovRangeSteps
+          : RANGE_STEPS_BYTES_LEGACY;
+
       const [info] = await Promise.all([
-        ensureMoovParsed(msg.videoUrl, signal),
+        ensureMoovParsed(msg.videoUrl, signal, moovSteps),
         ensureFfmpegLoaded(baseUrlForFfmpeg),
       ]);
 

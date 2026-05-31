@@ -4,6 +4,8 @@ import {useCallback, useEffect, useRef, useState} from "react";
 import {VideoPlayer} from "@/components/video/VideoPlayer";
 import {LoadingSpinner} from "@/components/ui/loading-spinner";
 import {AlertTriangleIcon} from "lucide-react";
+import {isPrewarmEnabled} from "@/lib/video-perf-flags";
+import {prewarmFfmpegInWorker, prewarmWasmVerificationSession} from "@/lib/wasm-watermark-verification-client";
 
 type FetchStatus = "loading" | "ready" | "not_found" | "fetch_error";
 type VerificationStatus = "verifying" | "verified" | "failed" | null;
@@ -17,6 +19,7 @@ type Props = {
    *  the failure was a definitive 404. */
   initialPlaybackUrl: string | null;
   initialError: InitialError | null;
+  ssrVideo?: boolean;
 };
 
 /**
@@ -31,7 +34,7 @@ type Props = {
  * Sizing: fills its parent (the iframe). Embedders are responsible for sizing
  * the iframe itself (the share-UI snippet defaults to a responsive 16:9 box).
  */
-export function EmbedVideoView({videoId, initialPlaybackUrl, initialError}: Props) {
+export function EmbedVideoView({videoId, initialPlaybackUrl, initialError, ssrVideo = false}: Props) {
   const initialStatus: FetchStatus = initialPlaybackUrl
     ? "ready"
     : initialError?.status === 404
@@ -50,6 +53,16 @@ export function EmbedVideoView({videoId, initialPlaybackUrl, initialError}: Prop
 
   const fetchInflightRef = useRef(false);
   const skipNextFetchRef = useRef(Boolean(initialPlaybackUrl) || initialError?.status === 404);
+
+  useEffect(() => {
+    if (!isPrewarmEnabled()) return;
+    void prewarmFfmpegInWorker();
+  }, []);
+
+  useEffect(() => {
+    if (!isPrewarmEnabled() || !initialPlaybackUrl) return;
+    void prewarmWasmVerificationSession(initialPlaybackUrl);
+  }, [initialPlaybackUrl]);
 
   useEffect(() => {
     let cancelled = false;
@@ -142,6 +155,24 @@ export function EmbedVideoView({videoId, initialPlaybackUrl, initialError}: Prop
   }
 
   // ready
+  if (ssrVideo && playbackUrl) {
+    return (
+      <VideoPlayer
+        embedded
+        ssrVideo
+        videoUrl={playbackUrl}
+        videoId={videoId}
+        isOpen
+        onClose={noop}
+        enableFrameAnalysis
+        verificationStatus={verificationStatus}
+        verifiedUserId={verifiedUserId}
+        onVerificationComplete={handleVerificationComplete}
+        playbackContext="public"
+      />
+    );
+  }
+
   return (
     <main className="h-screen w-screen bg-black">
       {playbackUrl && (
@@ -155,6 +186,7 @@ export function EmbedVideoView({videoId, initialPlaybackUrl, initialError}: Prop
           verificationStatus={verificationStatus}
           verifiedUserId={verifiedUserId}
           onVerificationComplete={handleVerificationComplete}
+          playbackContext="public"
         />
       )}
     </main>

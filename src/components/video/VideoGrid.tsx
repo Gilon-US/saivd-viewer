@@ -13,14 +13,19 @@ import {useToast} from "@/hooks/useToast";
 import {LoadingSpinner} from "@/components/ui/loading-spinner";
 import {DeleteConfirmDialog} from "./DeleteConfirmDialog";
 import {VideoPlayer} from "./VideoPlayer";
+import {videoPlayProxyUrl} from "@/lib/video-playback-url";
+import {isPrewarmEnabled} from "@/lib/video-perf-flags";
+import {prewarmWasmVerificationSession} from "@/lib/wasm-watermark-verification-client";
 import {useState, useCallback} from "react";
 
 export type Video = {
   id: string;
   filename: string;
-  // NOTE: original_url now stores the stable storage key for the video object.
-  // A fresh playback URL is generated on demand via the /api/videos/[id]/play endpoint.
+  // NOTE: original_url stores the stable storage key in the database.
+  // GET /api/videos also returns playback_url (presigned watermarked URL for the player).
   original_url: string;
+  /** Presigned watermarked playback URL from GET /api/videos (list). */
+  playback_url?: string | null;
   original_thumbnail_url: string;
   preview_thumbnail_data: string | null;
   processed_url: string | null;
@@ -65,7 +70,6 @@ export function VideoGrid({videos, isLoading, error, onRefresh, onOpenUploadModa
     verifiedUserId: null,
   });
 
-  const [isOpeningVideo, setIsOpeningVideo] = useState<string | null>(null);
   const handleVerificationComplete = useCallback((status: "verified" | "failed", userId: string | null) => {
     setVideoPlayer((prev) => ({
       ...prev,
@@ -74,39 +78,25 @@ export function VideoGrid({videos, isLoading, error, onRefresh, onOpenUploadModa
     }));
   }, []);
 
-  const handleVideoClick = async (video: Video) => {
-    try {
-      setIsOpeningVideo(video.id);
+  const handleVideoClick = (video: Video) => {
+    const playbackUrl = video.playback_url?.trim() || videoPlayProxyUrl(video.id);
 
-      // Always use watermarked variant for playback with frame analysis
-      const response = await fetch(`/api/videos/${video.id}/play?variant=watermarked`);
-      const data = await response.json();
-
-      if (!response.ok || !data.success || !data.data?.playbackUrl) {
-        throw new Error(data.error?.message || "Failed to generate playback URL");
-      }
-
-      // For watermarked videos, open player in "verifying" state; frontend verification runs in VideoPlayer
-      setVideoPlayer({
-        isOpen: true,
-        videoUrl: data.data.playbackUrl,
-        videoId: video.id,
-        enableFrameAnalysis: true,
-        verificationStatus: "verifying",
-        verifiedUserId: null,
-      });
-    } catch (error) {
-      console.error("Error opening video:", error);
-      toast({
-        title: "Unable to play video",
-        description:
-          error instanceof Error ? error.message : "There was a problem generating a playback URL. Please try again.",
-        variant: "error",
-      });
-    } finally {
-      setIsOpeningVideo(null);
-    }
+    setVideoPlayer({
+      isOpen: true,
+      videoUrl: playbackUrl,
+      videoId: video.id,
+      enableFrameAnalysis: true,
+      verificationStatus: "verifying",
+      verifiedUserId: null,
+    });
   };
+
+  const handleVideoHover = useCallback((video: Video) => {
+    if (!isPrewarmEnabled()) return;
+    const url = video.playback_url?.trim();
+    if (!url) return;
+    void prewarmWasmVerificationSession(url);
+  }, []);
 
   const handleClosePlayer = () => {
     setVideoPlayer({
@@ -368,12 +358,8 @@ export function VideoGrid({videos, isLoading, error, onRefresh, onOpenUploadModa
               {/* Video thumbnail */}
               <div
                 className="w-60 max-w-[240px] aspect-video relative bg-gray-100 dark:bg-gray-800 rounded-lg overflow-hidden cursor-pointer hover:opacity-90 transition-opacity"
-                onClick={() => handleVideoClick(video)}>
-                {isOpeningVideo === video.id && (
-                  <div className="absolute inset-0 flex items-center justify-center bg-black/40 z-10">
-                    <LoadingSpinner size="sm" />
-                  </div>
-                )}
+                onClick={() => handleVideoClick(video)}
+                onMouseEnter={() => handleVideoHover(video)}>
                 {video.preview_thumbnail_data ? (
                   // Using <img> for base64 data URLs is appropriate since Next.js Image component
                   // is designed for external URLs and file paths, not data URLs
@@ -423,6 +409,7 @@ export function VideoGrid({videos, isLoading, error, onRefresh, onOpenUploadModa
           verificationStatus={videoPlayer.verificationStatus}
           verifiedUserId={videoPlayer.verifiedUserId}
           onVerificationComplete={handleVerificationComplete}
+          playbackContext="dashboard"
         />
       )}
     </div>

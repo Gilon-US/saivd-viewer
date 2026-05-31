@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/utils/supabase/server';
+import { presignWatermarkedPlaybackUrl } from '@/lib/video-playback-presign';
 
 /**
  * GET /api/videos
@@ -76,18 +77,17 @@ export async function GET(request: NextRequest) {
       );
     }
     
-    // Debug: Log video data to verify original_url is present
-    console.log('Fetched videos:', videos?.map(v => ({
-      id: v.id,
-      filename: v.filename,
-      original_url: v.original_url,
-      has_original_url: !!v.original_url,
-    })));
-    
+    const resolved = await Promise.all(
+      (videos ?? []).map(async (video) => {
+        const playback_url = await presignWatermarkedPlaybackUrl(video);
+        return {...video, playback_url};
+      }),
+    );
+
     return NextResponse.json({
       success: true,
       data: {
-        videos,
+        videos: resolved,
         pagination: {
           page,
           limit,

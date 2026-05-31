@@ -2,6 +2,8 @@ import {NextRequest, NextResponse} from "next/server";
 
 type TelemetryPayload = {
   imageId?: string;
+  videoId?: string;
+  kind?: string;
   phases?: Record<string, number>;
   path?: string;
   outcome?: string;
@@ -33,9 +35,9 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  if (!body.imageId || typeof body.imageId !== "string") {
+  if (!body.imageId && !body.videoId) {
     return NextResponse.json(
-      {success: false, error: {code: "validation_error", message: "imageId required"}},
+      {success: false, error: {code: "validation_error", message: "imageId or videoId required"}},
       {status: 400},
     );
   }
@@ -43,7 +45,8 @@ export async function POST(request: NextRequest) {
   if (process.env.NODE_ENV !== "production") {
     console.info("[verify-telemetry]", JSON.stringify(body));
   } else {
-    console.info("[verify-telemetry]", body.imageId, body.path ?? body.event ?? "mark", body.outcome ?? "");
+    const id = body.videoId ?? body.imageId;
+    console.info("[verify-telemetry]", id, body.kind ?? body.path ?? body.event ?? "mark", body.outcome ?? "");
   }
 
   return NextResponse.json({success: true});

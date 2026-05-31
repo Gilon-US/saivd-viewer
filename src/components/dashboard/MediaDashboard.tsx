@@ -10,6 +10,7 @@ import {useVideos} from "@/hooks/useVideos";
 import {useImages} from "@/hooks/useImages";
 import {cn} from "@/lib/utils";
 import {UploadIcon, RefreshCwIcon} from "lucide-react";
+import {FfmpegWorkerPrewarm} from "@/components/video/FfmpegWorkerPrewarm";
 
 export type MediaTab = "videos" | "images";
 
@@ -51,6 +52,7 @@ export function MediaDashboard({initialTab = "videos"}: MediaDashboardProps) {
 
   return (
     <div className="space-y-6">
+      <FfmpegWorkerPrewarm />
       <div className="flex items-center justify-between gap-4">
         <div>
           <h1 className="text-3xl font-bold">My Media</h1>

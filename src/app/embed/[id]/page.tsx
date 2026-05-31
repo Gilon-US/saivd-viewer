@@ -1,4 +1,4 @@
-import {EmbedVideoView} from "./_view";
+import {PublicVideoPageContent} from "@/components/video/PublicVideoPageContent";
 import {getPublicPlaybackData} from "@/lib/playback-url";
 
 /** ISR: regenerate the rendered embed (and its prefetched presigned URL)
@@ -21,13 +21,5 @@ export default async function EmbedVideoPage({params}: {params: Promise<Params>}
   const {id} = await params;
   const result = await getPublicPlaybackData(id, "watermarked");
 
-  return (
-    <EmbedVideoView
-      videoId={id}
-      initialPlaybackUrl={result.ok ? result.playbackUrl : null}
-      initialError={
-        result.ok ? null : {code: result.code, message: result.message, status: result.status}
-      }
-    />
-  );
+  return <PublicVideoPageContent videoId={id} result={result} embed />;
 }
