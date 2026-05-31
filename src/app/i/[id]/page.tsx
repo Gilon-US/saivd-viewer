@@ -1,5 +1,5 @@
 import type {Metadata} from "next";
-import {PublicImageView} from "@/components/image/PublicImageView";
+import {PublicImagePageContent} from "@/components/image/PublicImagePageContent";
 import {getPublicImageViewData} from "@/lib/image-view-url";
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "https://viewer.saivd.io";
@@ -39,11 +39,5 @@ export default async function PublicImagePage({params}: {params: Promise<Params>
   const {id} = await params;
   const result = await getPublicImageViewData(id);
 
-  return (
-    <PublicImageView
-      imageId={id}
-      initialViewUrl={result.ok ? result.viewUrl : null}
-      initialError={result.ok ? null : {code: result.code, message: result.message, status: result.status}}
-    />
-  );
+  return <PublicImagePageContent imageId={id} result={result} />;
 }

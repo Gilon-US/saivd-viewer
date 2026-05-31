@@ -1,6 +1,7 @@
 "use client";
 
 import {useState} from "react";
+import {useRouter, usePathname} from "next/navigation";
 import {Button} from "@/components/ui/button";
 import {VideoGrid} from "@/components/video/VideoGrid";
 import {ImageGrid} from "@/components/image/ImageGrid";
@@ -12,12 +13,24 @@ import {UploadIcon, RefreshCwIcon} from "lucide-react";
 
 export type MediaTab = "videos" | "images";
 
+const VIDEOS_PATH = "/dashboard/videos";
+const IMAGES_PATH = "/dashboard/images";
+
+function mediaTabFromPathname(pathname: string | null): MediaTab {
+  if (pathname === IMAGES_PATH || pathname?.startsWith(`${IMAGES_PATH}/`)) {
+    return "images";
+  }
+  return "videos";
+}
+
 type MediaDashboardProps = {
   initialTab?: MediaTab;
 };
 
 export function MediaDashboard({initialTab = "videos"}: MediaDashboardProps) {
-  const [activeTab, setActiveTab] = useState<MediaTab>(initialTab);
+  const router = useRouter();
+  const pathname = usePathname();
+  const activeTab = pathname ? mediaTabFromPathname(pathname) : initialTab;
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const {videos, isLoading, error, refresh} = useVideos({autoFetch: true});
   const {images, isLoading: imagesLoading, error: imagesError, refresh: refreshImages, deleteImage} =
@@ -62,7 +75,7 @@ export function MediaDashboard({initialTab = "videos"}: MediaDashboardProps) {
       <nav className="flex gap-2 border-b border-gray-200 dark:border-gray-700 pb-3">
         <button
           type="button"
-          onClick={() => setActiveTab("videos")}
+          onClick={() => router.push(VIDEOS_PATH)}
           className={cn(
             "px-3 py-2 rounded-md text-sm font-medium transition-colors",
             activeTab === "videos"
@@ -73,7 +86,7 @@ export function MediaDashboard({initialTab = "videos"}: MediaDashboardProps) {
         </button>
         <button
           type="button"
-          onClick={() => setActiveTab("images")}
+          onClick={() => router.push(IMAGES_PATH)}
           className={cn(
             "px-3 py-2 rounded-md text-sm font-medium transition-colors",
             activeTab === "images"

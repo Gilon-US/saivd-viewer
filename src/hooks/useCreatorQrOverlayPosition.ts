@@ -8,13 +8,10 @@ import {
   type QrOverlayPosition,
 } from "@/lib/presentation-qr/position";
 
-const SAIVD_API_ORIGIN =
-  process.env.NEXT_PUBLIC_SAIVD_API_URL?.replace(/\/+$/, "") ?? "https://saivd.netlify.app";
-
 const CACHE_PREFIX = "saivd_qr_overlay_position:";
 
 /**
- * Loads a creator's QR overlay corner from the creator public profile API.
+ * Loads a creator's QR overlay corner via the viewer proxy (same-origin).
  * Cached in sessionStorage for the browser session.
  */
 export function useCreatorQrOverlayPosition(numericUserId: number | null): QrOverlayPosition {
@@ -40,7 +37,7 @@ export function useCreatorQrOverlayPosition(numericUserId: number | null): QrOve
 
     void (async () => {
       try {
-        const res = await fetch(`${SAIVD_API_ORIGIN}/api/profile/${numericUserId}`, {
+        const res = await fetch(`/api/creator/profile/${numericUserId}`, {
           credentials: "omit",
         });
         const body = await res.json().catch(() => null);

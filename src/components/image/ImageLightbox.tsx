@@ -1,5 +1,6 @@
 "use client";
 
+import {useEffect, useLayoutEffect, useRef, useState} from "react";
 import {LoadingSpinner} from "@/components/ui/loading-spinner";
 import {PresentationQrFlipButton} from "@/components/presentation/PresentationQrFlipButton";
 import {useCreatorQrOverlayPosition} from "@/hooks/useCreatorQrOverlayPosition";
@@ -30,10 +31,32 @@ function verificationFailMessage(
   return "Image could not be decoded.";
 }
 
-export function ImageLightbox({isOpen, imageId, filename, onClose}: ImageLightboxProps) {
-  const verification = useImageWatermarkVerification(imageId, {enabled: isOpen});
+export function ImageLightbox({isOpen, imageId, filename, previewUrl, onClose}: ImageLightboxProps) {
+  const imgRef = useRef<HTMLImageElement>(null);
+  const [imgReady, setImgReady] = useState(false);
+  const displayUrl = previewUrl?.trim() || imageViewProxyUrl(imageId);
+  const usesPresignedUrl = displayUrl.startsWith("http");
+
+  useEffect(() => {
+    if (!isOpen) setImgReady(false);
+  }, [isOpen, imageId]);
+
+  useLayoutEffect(() => {
+    if (!isOpen) return;
+    const el = imgRef.current;
+    if (el?.complete && el.naturalWidth > 0) {
+      setImgReady(true);
+    }
+  }, [isOpen, displayUrl]);
+
+  const verification = useImageWatermarkVerification(imageId, {
+    enabled: isOpen,
+    imgRef,
+    imgReady,
+    viewUrl: displayUrl,
+    fetchCredentials: usesPresignedUrl ? "omit" : "include",
+  });
   const qrOverlayPosition = useCreatorQrOverlayPosition(verification.verifiedUserId);
-  const displayUrl = imageViewProxyUrl(imageId);
 
   if (!isOpen) return null;
 
@@ -44,8 +67,12 @@ export function ImageLightbox({isOpen, imageId, filename, onClose}: ImageLightbo
       <div className="relative inline-block max-w-full max-h-full" onClick={(e) => e.stopPropagation()}>
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
+          ref={imgRef}
           src={displayUrl}
           alt={filename}
+          crossOrigin="anonymous"
+          fetchPriority="high"
+          onLoad={() => setImgReady(true)}
           className="block max-w-full max-h-[90vh] object-contain rounded-lg shadow-2xl"
         />
 

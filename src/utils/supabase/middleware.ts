@@ -56,6 +56,7 @@ export async function updateSession(request: NextRequest) {
     !pathname.startsWith("/api/public/") && // Public, unauthenticated endpoints (e.g. share-by-link)
     !pathname.startsWith("/api/oembed") && // oEmbed discovery (WordPress, Notion, etc.)
     !pathname.startsWith("/api/presentation/") && // Proxied presentation QR mint
+    !pathname.startsWith("/api/creator/") && // Proxied creator public profile metadata
     !pathname.startsWith("/api/videos/upload") && // Allow upload endpoint (handles its own auth)
     !pathname.startsWith("/api/callbacks");
 

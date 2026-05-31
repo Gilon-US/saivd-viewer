@@ -201,6 +201,7 @@ export function ImageGrid({
                   <img
                     src={image.original_url}
                     alt={image.filename}
+                    crossOrigin="anonymous"
                     className="object-contain w-full h-full"
                     loading="lazy"
                   />

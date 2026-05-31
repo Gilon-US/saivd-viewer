@@ -1,9 +1,16 @@
 import {NextResponse} from "next/server";
+import {profileWithBootstrapSuperuserRole} from "@/lib/bootstrap-superuser";
+import {fetchProfileForUser, updateProfileForUser} from "@/lib/profile-db";
 import {createClient} from "@/utils/supabase/server";
 import {isQrOverlayPosition} from "@/lib/presentation-qr/position";
 
-const PROFILE_COLUMNS =
-  "id, email, display_name, qr_overlay_position, role, created_at, updated_at";
+function displayNameFromUser(user: {email?: string | null; user_metadata?: Record<string, unknown>}) {
+  const fromMeta = user.user_metadata?.display_name;
+  if (typeof fromMeta === "string" && fromMeta.trim()) return fromMeta.trim();
+  const email = user.email ?? "";
+  const local = email.split("@")[0];
+  return local || null;
+}
 
 export async function GET() {
   const supabase = await createClient();
@@ -12,16 +19,43 @@ export async function GET() {
   } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({success: false, error: "Auth required"}, {status: 401});
 
-  const {data, error} = await supabase
-    .from("profiles")
-    .select(PROFILE_COLUMNS)
-    .eq("id", user.id)
-    .single();
+  const {data, error} = await fetchProfileForUser(supabase, user.id);
 
-  if (error || !data) {
+  if (error) {
+    if (error.code === "PGRST116") {
+      const now = new Date().toISOString();
+      const insertPayload = {
+        id: user.id,
+        email: user.email || "",
+        display_name: displayNameFromUser(user),
+        created_at: now,
+        updated_at: now,
+      };
+
+      const {error: createError} = await supabase.from("profiles").insert(insertPayload);
+      if (createError && createError.code !== "23505") {
+        console.error("Error creating profile:", createError);
+        return NextResponse.json({success: false, error: "Failed to create profile"}, {status: 500});
+      }
+
+      const {data: created, error: fetchCreatedError} = await fetchProfileForUser(supabase, user.id);
+      if (fetchCreatedError || !created) {
+        console.error("Error fetching profile after create:", fetchCreatedError);
+        return NextResponse.json({success: false, error: "Failed to create profile"}, {status: 500});
+      }
+
+      return NextResponse.json({success: true, data: profileWithBootstrapSuperuserRole(created)});
+    }
+
+    console.error("Error fetching profile:", error);
+    return NextResponse.json({success: false, error: "Failed to fetch profile"}, {status: 500});
+  }
+
+  if (!data) {
     return NextResponse.json({success: false, error: "Profile not found"}, {status: 404});
   }
-  return NextResponse.json({success: true, data});
+
+  return NextResponse.json({success: true, data: profileWithBootstrapSuperuserRole(data)});
 }
 
 export async function PUT(request: Request) {
@@ -53,14 +87,18 @@ export async function PUT(request: Request) {
   }
   updates.updated_at = new Date().toISOString();
 
-  const {data, error} = await supabase
-    .from("profiles")
-    .update(updates)
-    .eq("id", user.id)
-    .select(PROFILE_COLUMNS)
-    .single();
-  if (error || !data) {
+  const {data, error, qrColumnMissing} = await updateProfileForUser(supabase, user.id, updates);
+  if (error) {
+    if (qrColumnMissing) {
+      return NextResponse.json(
+        {success: false, error: error.message ?? "QR overlay preference unavailable"},
+        {status: 503}
+      );
+    }
     return NextResponse.json({success: false, error: "Update failed"}, {status: 500});
   }
-  return NextResponse.json({success: true, data});
+  if (!data) {
+    return NextResponse.json({success: false, error: "Update failed"}, {status: 500});
+  }
+  return NextResponse.json({success: true, data: profileWithBootstrapSuperuserRole(data)});
 }

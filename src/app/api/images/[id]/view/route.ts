@@ -1,10 +1,8 @@
 import {NextRequest, NextResponse} from "next/server";
-import {GetObjectCommand} from "@aws-sdk/client-s3";
 import {createClient} from "@/utils/supabase/server";
-import {extractKeyFromUrl} from "@/lib/wasabi-urls";
-import {wasabiClient, WASABI_BUCKET} from "@/lib/wasabi";
+import {extractKeyFromUrl, generatePresignedVideoUrl} from "@/lib/wasabi-urls";
 
-/** Authenticated same-origin proxy for dashboard lightbox + verification. */
+/** Authenticated view URL for dashboard lightbox + verification (redirects to Wasabi). */
 export async function GET(_request: NextRequest, context: {params: Promise<{id: string}>}) {
   try {
     const {id: imageId} = await context.params;
@@ -22,7 +20,7 @@ export async function GET(_request: NextRequest, context: {params: Promise<{id: 
 
     const {data: image, error} = await supabase
       .from("images")
-      .select("id, user_id, original_url, processed_url, content_type")
+      .select("id, user_id, original_url, processed_url")
       .eq("id", imageId)
       .eq("user_id", user.id)
       .single();
@@ -54,27 +52,9 @@ export async function GET(_request: NextRequest, context: {params: Promise<{id: 
       key = extracted;
     }
 
-    const obj = await wasabiClient.send(new GetObjectCommand({Bucket: WASABI_BUCKET, Key: key}));
-    const body = obj.Body;
-    if (!body) {
-      return NextResponse.json(
-        {success: false, error: {code: "not_found", message: "File not found in storage"}},
-        {status: 404},
-      );
-    }
+    const viewUrl = await generatePresignedVideoUrl(key);
 
-    const bytes = Buffer.from(await body.transformToByteArray());
-    const contentType = image.content_type?.includes("png")
-      ? "image/png"
-      : obj.ContentType ?? "image/png";
-
-    return new NextResponse(bytes, {
-      status: 200,
-      headers: {
-        "Content-Type": contentType,
-        "Cache-Control": "private, max-age=60",
-      },
-    });
+    return NextResponse.redirect(viewUrl, 307);
   } catch (error) {
     console.error("[images/view] error:", error);
     return NextResponse.json(

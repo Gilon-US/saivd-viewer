@@ -1,9 +1,10 @@
 "use client";
 
-import {useEffect, useRef, useState} from "react";
+import {useEffect, useLayoutEffect, useRef, useState} from "react";
 import {LoadingSpinner} from "@/components/ui/loading-spinner";
 import {AlertTriangleIcon} from "lucide-react";
-import {verifyImageWatermark} from "@/lib/image-watermark-verification";
+import {getVerifyMode} from "@/lib/image-verify-mode";
+import {verifyImageWatermarkRunner} from "@/lib/image-watermark-verification-runner";
 import {PresentationQrFlipButton} from "@/components/presentation/PresentationQrFlipButton";
 import {useCreatorQrOverlayPosition} from "@/hooks/useCreatorQrOverlayPosition";
 
@@ -18,13 +19,20 @@ type PublicImageViewProps = {
   initialError: InitialError | null;
   /** Minimal chrome for iframe embeds */
   embed?: boolean;
+  /** Image is server-rendered in PublicImageShell; this component only adds verify UI. */
+  ssrImage?: boolean;
 };
+
+function ssrImageSelector(imageId: string): string {
+  return `img[data-saivd-public-image="${CSS.escape(imageId)}"]`;
+}
 
 export function PublicImageView({
   imageId,
   initialViewUrl,
   initialError,
   embed = false,
+  ssrImage = false,
 }: PublicImageViewProps) {
   const initialStatus: FetchStatus = initialViewUrl
     ? "ready"
@@ -38,9 +46,33 @@ export function PublicImageView({
     initialViewUrl ? "verifying" : "idle",
   );
   const [verifiedUserId, setVerifiedUserId] = useState<number | null>(null);
+  const [imgReady, setImgReady] = useState(false);
+  const imgRef = useRef<HTMLImageElement | null>(null);
   const qrOverlayPosition = useCreatorQrOverlayPosition(verifiedUserId);
   const fetchInflightRef = useRef(false);
   const skipNextFetchRef = useRef(Boolean(initialViewUrl) || initialError?.status === 404);
+
+  useLayoutEffect(() => {
+    if (!ssrImage || !viewUrl) return;
+
+    const el = document.querySelector(ssrImageSelector(imageId));
+    if (!(el instanceof HTMLImageElement)) return;
+
+    imgRef.current = el;
+    const onLoad = () => setImgReady(true);
+    if (el.complete && el.naturalWidth > 0) {
+      setImgReady(true);
+    } else {
+      setImgReady(false);
+      el.addEventListener("load", onLoad);
+      return () => el.removeEventListener("load", onLoad);
+    }
+  }, [ssrImage, imageId, viewUrl]);
+
+  useEffect(() => {
+    if (ssrImage) return;
+    setImgReady(false);
+  }, [viewUrl, ssrImage]);
 
   useEffect(() => {
     let cancelled = false;
@@ -81,17 +113,21 @@ export function PublicImageView({
 
   useEffect(() => {
     if (!viewUrl || verificationStatus !== "verifying") return;
-    let bmp: ImageBitmap | null = null;
+    const needsImg = getVerifyMode() !== "blob";
+    if (needsImg && (!imgReady || !imgRef.current)) return;
+
+    const controller = new AbortController();
     let cancelled = false;
 
     (async () => {
       try {
-        const res = await fetch(viewUrl, {credentials: "omit"});
-        if (!res.ok) throw new Error("fetch failed");
-        const blob = await res.blob();
-        bmp = await createImageBitmap(blob);
-        if (cancelled) return;
-        const result = await verifyImageWatermark(bmp);
+        const result = await verifyImageWatermarkRunner({
+          imageId,
+          img: imgRef.current,
+          viewUrl,
+          fetchCredentials: "omit",
+          signal: controller.signal,
+        });
         if (cancelled) return;
         if (result.ok) {
           setVerifiedUserId(result.numericUserId);
@@ -101,16 +137,44 @@ export function PublicImageView({
         }
       } catch {
         if (!cancelled) setVerificationStatus("failed");
-      } finally {
-        bmp?.close();
       }
     })();
 
     return () => {
       cancelled = true;
-      bmp?.close();
+      controller.abort();
     };
-  }, [viewUrl, verificationStatus]);
+  }, [viewUrl, verificationStatus, imgReady, imageId]);
+
+  const overlay = (
+    <>
+      {verificationStatus === "verifying" && (
+        <div className="absolute top-2 left-2 sm:top-4 sm:left-4 z-20 flex items-center gap-2 rounded-md bg-black/60 px-2 py-1 text-xs text-white">
+          <LoadingSpinner size="sm" /> Verifying…
+        </div>
+      )}
+
+      {verificationStatus === "verified" && verifiedUserId !== null && (
+        <PresentationQrFlipButton
+          numericUserId={verifiedUserId}
+          mediaKind="image"
+          mediaId={imageId}
+          enabled={fetchStatus === "ready"}
+          position={qrOverlayPosition}
+        />
+      )}
+
+      {verificationStatus === "failed" && !embed && (
+        <div className="absolute bottom-2 left-2 right-2 sm:bottom-4 sm:left-4 sm:right-4 z-20 rounded-md bg-amber-600/90 px-3 py-2 text-xs text-white">
+          <div className="font-medium">Watermark verification failed</div>
+        </div>
+      )}
+    </>
+  );
+
+  if (ssrImage && fetchStatus === "ready" && viewUrl) {
+    return overlay;
+  }
 
   if (fetchStatus === "loading") {
     return (
@@ -142,32 +206,15 @@ export function PublicImageView({
       <div className="relative inline-block max-w-full max-h-full">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
+          ref={imgRef}
           src={viewUrl}
           alt="Verified image"
+          crossOrigin="anonymous"
+          fetchPriority="high"
+          onLoad={() => setImgReady(true)}
           className="block max-w-full max-h-full object-contain rounded-lg shadow-2xl"
         />
-
-        {verificationStatus === "verifying" && (
-          <div className="absolute top-2 left-2 sm:top-4 sm:left-4 z-20 flex items-center gap-2 rounded-md bg-black/60 px-2 py-1 text-xs text-white">
-            <LoadingSpinner size="sm" /> Verifying…
-          </div>
-        )}
-
-        {verificationStatus === "verified" && verifiedUserId !== null && (
-          <PresentationQrFlipButton
-            numericUserId={verifiedUserId}
-            mediaKind="image"
-            mediaId={imageId}
-            enabled={fetchStatus === "ready"}
-            position={qrOverlayPosition}
-          />
-        )}
-
-        {verificationStatus === "failed" && !embed && (
-          <div className="absolute bottom-2 left-2 right-2 sm:bottom-4 sm:left-4 sm:right-4 z-20 rounded-md bg-amber-600/90 px-3 py-2 text-xs text-white">
-            <div className="font-medium">Watermark verification failed</div>
-          </div>
-        )}
+        {overlay}
       </div>
     </div>
   );

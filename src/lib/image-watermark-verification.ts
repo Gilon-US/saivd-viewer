@@ -61,6 +61,17 @@ function imageBitmapToBlueRowSums(bmp: ImageBitmap): DecodedRegions | {error: st
   };
 }
 
+/** Parity harness — concatenated row-sum residues (one per row). Algorithm unchanged. */
+export function fingerprintBlueRowSums(bmp: ImageBitmap): Int32Array | {error: string} {
+  const decoded = imageBitmapToBlueRowSums(bmp);
+  if ("error" in decoded) return decoded;
+  const {height, rightSide, leftSide} = decoded;
+  const full = new Int32Array(height);
+  full.set(rightSide, 0);
+  full.set(leftSide, rightSide.length);
+  return full;
+}
+
 const PUBLIC_KEY_CACHE: Map<number, Promise<CryptoKey>> = new Map();
 
 export async function fetchImagePublicKey(numericUserId: number): Promise<CryptoKey> {
