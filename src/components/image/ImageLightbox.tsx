@@ -56,7 +56,9 @@ export function ImageLightbox({isOpen, imageId, filename, previewUrl, onClose}: 
     viewUrl: displayUrl,
     fetchCredentials: usesPresignedUrl ? "omit" : "include",
   });
-  const qrOverlayPosition = useCreatorQrOverlayPosition(verification.verifiedUserId);
+  const {position: qrOverlayPosition, logoUrl: creatorLogoUrl} = useCreatorQrOverlayPosition(
+    verification.verifiedUserId,
+  );
 
   if (!isOpen) return null;
 
@@ -83,6 +85,7 @@ export function ImageLightbox({isOpen, imageId, filename, previewUrl, onClose}: 
             mediaId={imageId}
             enabled={isOpen}
             position={qrOverlayPosition}
+            logoUrl={creatorLogoUrl}
           />
         )}
 

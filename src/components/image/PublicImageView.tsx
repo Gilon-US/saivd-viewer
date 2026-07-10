@@ -48,7 +48,7 @@ export function PublicImageView({
   const [verifiedUserId, setVerifiedUserId] = useState<number | null>(null);
   const [imgReady, setImgReady] = useState(false);
   const imgRef = useRef<HTMLImageElement | null>(null);
-  const qrOverlayPosition = useCreatorQrOverlayPosition(verifiedUserId);
+  const {position: qrOverlayPosition, logoUrl: creatorLogoUrl} = useCreatorQrOverlayPosition(verifiedUserId);
   const fetchInflightRef = useRef(false);
   const skipNextFetchRef = useRef(Boolean(initialViewUrl) || initialError?.status === 404);
 
@@ -161,6 +161,7 @@ export function PublicImageView({
           mediaId={imageId}
           enabled={fetchStatus === "ready"}
           position={qrOverlayPosition}
+          logoUrl={creatorLogoUrl}
         />
       )}
 

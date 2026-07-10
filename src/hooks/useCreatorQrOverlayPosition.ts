@@ -10,16 +10,36 @@ import {
 
 const CACHE_PREFIX = "saivd_qr_overlay_position:";
 
+export type CreatorQrOverlay = {
+  position: QrOverlayPosition;
+  /** Resolved creator brand logo URL, if available */
+  logoUrl: string | null;
+};
+
 /**
- * Loads a creator's QR overlay corner via the viewer proxy (same-origin).
- * Cached in sessionStorage for the browser session.
+ * Loads a creator's QR overlay corner and brand logo via the viewer proxy (same-origin).
+ * Position is cached in sessionStorage for the browser session (logo URLs are not —
+ * they are often short-lived presigned links).
  */
-export function useCreatorQrOverlayPosition(numericUserId: number | null): QrOverlayPosition {
-  const [position, setPosition] = useState<QrOverlayPosition>(DEFAULT_QR_OVERLAY_POSITION);
+export function useCreatorQrOverlayPosition(numericUserId: number | null): CreatorQrOverlay {
+  const [overlay, setOverlay] = useState<CreatorQrOverlay>(() => {
+    if (numericUserId === null) {
+      return {position: DEFAULT_QR_OVERLAY_POSITION, logoUrl: null};
+    }
+    try {
+      const cached = sessionStorage.getItem(`${CACHE_PREFIX}${numericUserId}`);
+      if (cached && isQrOverlayPosition(cached)) {
+        return {position: cached, logoUrl: null};
+      }
+    } catch {
+      /* ignore storage errors */
+    }
+    return {position: DEFAULT_QR_OVERLAY_POSITION, logoUrl: null};
+  });
 
   useEffect(() => {
     if (numericUserId === null) {
-      setPosition(DEFAULT_QR_OVERLAY_POSITION);
+      setOverlay({position: DEFAULT_QR_OVERLAY_POSITION, logoUrl: null});
       return;
     }
 
@@ -27,7 +47,7 @@ export function useCreatorQrOverlayPosition(numericUserId: number | null): QrOve
     try {
       const cached = sessionStorage.getItem(cacheKey);
       if (cached && isQrOverlayPosition(cached)) {
-        setPosition(cached);
+        setOverlay((prev) => ({...prev, position: cached}));
       }
     } catch {
       /* ignore storage errors */
@@ -44,7 +64,8 @@ export function useCreatorQrOverlayPosition(numericUserId: number | null): QrOve
         if (cancelled || !res.ok || !body?.success) return;
 
         const next = parseQrOverlayPosition(body.data?.qr_overlay_position);
-        setPosition(next);
+        const logo = typeof body.data?.logo === "string" ? body.data.logo.trim() : "";
+        setOverlay({position: next, logoUrl: logo || null});
         try {
           sessionStorage.setItem(cacheKey, next);
         } catch {
@@ -60,5 +81,5 @@ export function useCreatorQrOverlayPosition(numericUserId: number | null): QrOve
     };
   }, [numericUserId]);
 
-  return position;
+  return overlay;
 }

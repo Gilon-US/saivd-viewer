@@ -19,7 +19,7 @@ jest.mock('@/hooks/useWatermarkVerification', () => ({
 }));
 
 jest.mock('@/hooks/useCreatorQrOverlayPosition', () => ({
-  useCreatorQrOverlayPosition: () => 'top-right',
+  useCreatorQrOverlayPosition: () => ({position: 'top-right', logoUrl: null}),
 }));
 
 describe('VideoPlayer', () => {

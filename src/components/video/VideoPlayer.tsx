@@ -160,7 +160,8 @@ export function VideoPlayer({
 
   // Presentation QR from verified creator numeric user ID.
   const presentationNumericId = verifiedUserId ? Number(verifiedUserId) : null;
-  const qrOverlayPosition = useCreatorQrOverlayPosition(presentationNumericId);
+  const {position: qrOverlayPosition, logoUrl: creatorLogoUrl} =
+    useCreatorQrOverlayPosition(presentationNumericId);
 
   // Diagnostic: playback plan (src always attached; verify-first may use metadata preload).
   useEffect(() => {
@@ -364,6 +365,7 @@ export function VideoPlayer({
               mediaId={videoId}
               enabled={isOpen && !isPlaybackBlocked}
               position={qrOverlayPosition}
+              logoUrl={creatorLogoUrl}
               elevateAboveBottomControls
             />
           )}
