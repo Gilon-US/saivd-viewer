@@ -3,6 +3,8 @@
  * See docs/IMAGE_WATERMARK_SPEC.md
  */
 
+import {getWatermarkCanvas2dContext} from "@/lib/image-bitmap-decode";
+
 const RSA_LEN = 256;
 const USER_ID_DIGITS = 9;
 const SIGNED_MESSAGE_LENGTH = 100;
@@ -33,15 +35,15 @@ function imageBitmapToBlueRowSums(bmp: ImageBitmap): DecodedRegions | {error: st
   if (W < RSA_LEN || H < RSA_LEN + USER_ID_DIGITS) {
     return {error: `image too small (${W}x${H})`};
   }
-  let ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
+  let ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null;
   if (typeof OffscreenCanvas !== "undefined") {
     const oc = new OffscreenCanvas(W, H);
-    ctx = oc.getContext("2d") as OffscreenCanvasRenderingContext2D;
+    ctx = getWatermarkCanvas2dContext(oc);
   } else {
     const c = document.createElement("canvas");
     c.width = W;
     c.height = H;
-    ctx = c.getContext("2d") as CanvasRenderingContext2D;
+    ctx = getWatermarkCanvas2dContext(c);
   }
   if (!ctx) return {error: "could not get 2d context"};
   ctx.drawImage(bmp, 0, 0);

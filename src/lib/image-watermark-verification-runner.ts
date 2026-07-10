@@ -16,7 +16,7 @@ export type ImageVerificationRunnerArgs = {
   viewUrl: string;
   fetchCredentials: RequestCredentials;
   signal?: AbortSignal;
-  /** Default legacy matches production blob decode until strict parity is approved. */
+  /** Default strict avoids Safari/iOS color-management mutating B-channel bytes. */
   decodeVariant?: BitmapDecodeVariant;
 };
 
@@ -40,7 +40,7 @@ async function runBlobPath(
     };
   }
   const blob = await res.blob();
-  const variant = args.decodeVariant ?? "legacy";
+  const variant = args.decodeVariant ?? "strict";
   const bmp = await decodeBitmapFromBlob(blob, variant);
   mark(args.imageId, "bitmap_ready");
   try {
@@ -58,7 +58,7 @@ async function runImgPath(
 ): Promise<ImageVerificationRunnerResult | null> {
   if (!args.img) return null;
   mark(args.imageId, "img_visible");
-  const variant = args.decodeVariant ?? "legacy";
+  const variant = args.decodeVariant ?? "strict";
   const bmp = await decodeBitmapFromImg(args.img, variant);
   mark(args.imageId, "bitmap_ready");
   try {

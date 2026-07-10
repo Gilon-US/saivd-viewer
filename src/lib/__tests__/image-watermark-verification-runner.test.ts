@@ -70,7 +70,7 @@ describe("verifyImageWatermarkRunner", () => {
       fetchCredentials: "omit",
     });
 
-    expect(decodeBitmapFromImg).toHaveBeenCalledWith(img, "legacy");
+    expect(decodeBitmapFromImg).toHaveBeenCalledWith(img, "strict");
     expect(result.path).toBe("img");
     expect(verifyImageWatermark).toHaveBeenCalled();
     expect(global.fetch).not.toHaveBeenCalled();
