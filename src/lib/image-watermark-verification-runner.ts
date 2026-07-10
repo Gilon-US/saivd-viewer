@@ -3,9 +3,13 @@ import {
   decodeBitmapFromImg,
   type BitmapDecodeVariant,
 } from "@/lib/image-bitmap-decode";
+import {decodeRgbaFromPngBuffer} from "@/lib/image-png-decode";
+import {isIosWebKit} from "@/lib/ios-webkit";
 import {getVerifyMode} from "@/lib/image-verify-mode";
 import {flushBeacon, mark, type VerifyPathLabel} from "@/lib/perf/verify-marks";
 import {
+  blueRowSumsFromRgba,
+  verifyImageRegions,
   verifyImageWatermark,
   type ImageVerificationResult,
 } from "@/lib/image-watermark-verification";
@@ -143,10 +147,65 @@ async function runShadowMode(
   };
 }
 
+async function runIosRawBlobPath(
+  args: ImageVerificationRunnerArgs,
+): Promise<ImageVerificationRunnerResult> {
+  mark(args.imageId, "fetch_start");
+  const res = await fetch(args.viewUrl, {
+    credentials: args.fetchCredentials,
+    signal: args.signal,
+  });
+  mark(args.imageId, "fetch_end");
+  if (!res.ok) {
+    return {
+      ok: false,
+      reason: "fetch_failed",
+      detail: `image_fetch_failed: ${res.status}`,
+      path: "blob",
+    };
+  }
+  const buf = await res.arrayBuffer();
+  mark(args.imageId, "bitmap_ready");
+  try {
+    const {width, height, rgba} = decodeRgbaFromPngBuffer(buf);
+    const regions = blueRowSumsFromRgba(width, height, rgba);
+    if ("error" in regions) {
+      const bmp = await decodeBitmapFromBlob(new Blob([buf]), args.decodeVariant ?? "strict");
+      try {
+        const result = await verifyImageWatermark(bmp);
+        mark(args.imageId, "verify_end");
+        flushBeacon(args.imageId, {path: "blob", outcome: result.ok ? "ok" : result.reason, ios: true});
+        return {...result, path: "blob"};
+      } finally {
+        bmp.close();
+      }
+    }
+    const result = await verifyImageRegions(regions);
+    mark(args.imageId, "verify_end");
+    flushBeacon(args.imageId, {path: "blob", outcome: result.ok ? "ok" : result.reason, iosRaw: true});
+    return {...result, path: "blob"};
+  } catch {
+    const bmp = await decodeBitmapFromBlob(new Blob([buf]), args.decodeVariant ?? "strict");
+    try {
+      const result = await verifyImageWatermark(bmp);
+      mark(args.imageId, "verify_end");
+      flushBeacon(args.imageId, {path: "blob", outcome: result.ok ? "ok" : result.reason, iosFallback: true});
+      return {...result, path: "blob"};
+    } finally {
+      bmp.close();
+    }
+  }
+}
+
 /** Single entry for image watermark verification with mode flag and img/blob fallback. */
 export async function verifyImageWatermarkRunner(
   args: ImageVerificationRunnerArgs,
 ): Promise<ImageVerificationRunnerResult> {
+  // iOS WebKit only: never decode from <img> (reintroduces color management).
+  if (isIosWebKit()) {
+    return runIosRawBlobPath(args);
+  }
+
   const mode = getVerifyMode();
   if (mode === "blob") {
     return runBlobPath(args);

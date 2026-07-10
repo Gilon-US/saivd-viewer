@@ -22,14 +22,42 @@ export type ImageVerificationOk = {ok: true; numericUserId: number};
 export type ImageVerificationFail = {ok: false; reason: ImageVerificationFailReason; detail?: string};
 export type ImageVerificationResult = ImageVerificationOk | ImageVerificationFail;
 
-type DecodedRegions = {
+export type DecodedRegions = {
   width: number;
   height: number;
   rightSide: Int32Array;
   leftSide: Int32Array;
 };
 
-function imageBitmapToBlueRowSums(bmp: ImageBitmap): DecodedRegions | {error: string} {
+export function blueRowSumsFromRgba(
+  width: number,
+  height: number,
+  rgba: Uint8Array | Uint8ClampedArray,
+): DecodedRegions | {error: string} {
+  const W = width;
+  const H = height;
+  if (W < RSA_LEN || H < RSA_LEN + USER_ID_DIGITS) {
+    return {error: `image too small (${W}x${H})`};
+  }
+  if (rgba.length < W * H * 4) {
+    return {error: `rgba buffer too short (${rgba.length}); need ${W * H * 4}`};
+  }
+  const rowSums = new Int32Array(H);
+  for (let y = 0; y < H; y++) {
+    let s = 0;
+    const base = y * W * 4;
+    for (let x = 0; x < W; x++) s += rgba[base + x * 4 + 2];
+    rowSums[y] = s % W;
+  }
+  return {
+    width: W,
+    height: H,
+    rightSide: rowSums.slice(0, H - RSA_LEN),
+    leftSide: rowSums.slice(H - RSA_LEN),
+  };
+}
+
+export function imageBitmapToBlueRowSums(bmp: ImageBitmap): DecodedRegions | {error: string} {
   const W = bmp.width;
   const H = bmp.height;
   if (W < RSA_LEN || H < RSA_LEN + USER_ID_DIGITS) {
@@ -48,19 +76,7 @@ function imageBitmapToBlueRowSums(bmp: ImageBitmap): DecodedRegions | {error: st
   if (!ctx) return {error: "could not get 2d context"};
   ctx.drawImage(bmp, 0, 0);
   const {data} = ctx.getImageData(0, 0, W, H);
-  const rowSums = new Int32Array(H);
-  for (let y = 0; y < H; y++) {
-    let s = 0;
-    const base = y * W * 4;
-    for (let x = 0; x < W; x++) s += data[base + x * 4 + 2];
-    rowSums[y] = s % W;
-  }
-  return {
-    width: W,
-    height: H,
-    rightSide: rowSums.slice(0, H - RSA_LEN),
-    leftSide: rowSums.slice(H - RSA_LEN),
-  };
+  return blueRowSumsFromRgba(W, H, data);
 }
 
 /** Parity harness — concatenated row-sum residues (one per row). Algorithm unchanged. */
@@ -116,12 +132,10 @@ export async function importRsaPublicKeyForVerify(pem: string): Promise<CryptoKe
   );
 }
 
-export async function verifyImageWatermark(
-  bmp: ImageBitmap,
+export async function verifyImageRegions(
+  decoded: DecodedRegions,
   options?: {publicKey?: CryptoKey},
 ): Promise<ImageVerificationResult> {
-  const decoded = imageBitmapToBlueRowSums(bmp);
-  if ("error" in decoded) return {ok: false, reason: "malformed", detail: decoded.error};
   const {rightSide, leftSide} = decoded;
 
   const digits = Array.from(rightSide.subarray(0, USER_ID_DIGITS));
@@ -158,4 +172,13 @@ export async function verifyImageWatermark(
   } catch (e) {
     return {ok: false, reason: "malformed", detail: e instanceof Error ? e.message : String(e)};
   }
+}
+
+export async function verifyImageWatermark(
+  bmp: ImageBitmap,
+  options?: {publicKey?: CryptoKey},
+): Promise<ImageVerificationResult> {
+  const decoded = imageBitmapToBlueRowSums(bmp);
+  if ("error" in decoded) return {ok: false, reason: "malformed", detail: decoded.error};
+  return verifyImageRegions(decoded, options);
 }

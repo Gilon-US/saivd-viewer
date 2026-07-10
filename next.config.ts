@@ -1,5 +1,6 @@
 import type { NextConfig } from "next";
 import path from "node:path";
+import packageJson from "./package.json";
 
 /**
  * Local dev opt-out for React Strict Mode. The watermark verification hook uses
@@ -18,6 +19,9 @@ const strictModeDisabledForSession = process.env.NEXT_DISABLE_STRICT_MODE === "1
 
 const nextConfig: NextConfig = {
   ...(process.env.USE_STANDALONE_OUTPUT === "true" ? { output: "standalone" as const } : {}),
+  env: {
+    NEXT_PUBLIC_APP_VERSION: packageJson.version,
+  },
   reactStrictMode: !strictModeDisabledForSession,
   transpilePackages: ["@ffmpeg/ffmpeg", "@ffmpeg/util", "mp4box"],
   /**
