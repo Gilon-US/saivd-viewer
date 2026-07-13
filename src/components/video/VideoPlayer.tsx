@@ -44,6 +44,7 @@ export function VideoPlayer({
   contentLengthBytes = null,
 }: VideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const stageRef = useRef<HTMLDivElement>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
@@ -259,23 +260,38 @@ export function VideoPlayer({
   }, [ssrVideo, isOpen, videoId, videoUrl]);
 
   const toggleFullscreen = () => {
-    if (videoRef.current) {
-      if (document.fullscreenElement) {
-        document.exitFullscreen();
-      } else {
-        const el = videoRef.current as HTMLVideoElement & {
-          webkitEnterFullscreen?: () => void;
-          webkitEnterFullScreen?: () => void;
-        };
-        // iOS Safari often doesn't support requestFullscreen() for <video>; use the WebKit API when available.
-        if (typeof el.webkitEnterFullscreen === "function") {
-          el.webkitEnterFullscreen();
-        } else if (typeof el.webkitEnterFullScreen === "function") {
-          el.webkitEnterFullScreen();
-        } else {
-          videoRef.current.requestFullscreen();
-        }
-      }
+    const stage = stageRef.current as (HTMLElement & {
+      webkitRequestFullscreen?: () => void;
+    }) | null;
+    const videoEl = videoRef.current as (HTMLVideoElement & {
+      webkitEnterFullscreen?: () => void;
+      webkitEnterFullScreen?: () => void;
+    }) | null;
+    const doc = document as Document & {
+      webkitFullscreenElement?: Element | null;
+      webkitExitFullscreen?: () => void;
+    };
+
+    if (document.fullscreenElement || doc.webkitFullscreenElement) {
+      if (document.exitFullscreen) document.exitFullscreen();
+      else if (doc.webkitExitFullscreen) doc.webkitExitFullscreen();
+      return;
+    }
+
+    // Container fullscreen keeps HTML overlays (QR) visible. Skip for SSR shell
+    // where the <video> lives outside stageRef — fullscreen the video there.
+    const preferContainer = !ssrVideo;
+
+    if (preferContainer && stage && typeof stage.requestFullscreen === "function") {
+      stage.requestFullscreen();
+    } else if (preferContainer && stage && typeof stage.webkitRequestFullscreen === "function") {
+      stage.webkitRequestFullscreen();
+    } else if (videoEl && typeof videoEl.webkitEnterFullscreen === "function") {
+      videoEl.webkitEnterFullscreen();
+    } else if (videoEl && typeof videoEl.webkitEnterFullScreen === "function") {
+      videoEl.webkitEnterFullScreen();
+    } else if (videoEl && typeof videoEl.requestFullscreen === "function") {
+      videoEl.requestFullscreen();
     }
   };
 
@@ -310,6 +326,8 @@ export function VideoPlayer({
 
         {/* Video container */}
         <div
+          ref={stageRef}
+          data-video-stage
           className={
             overlayMode
               ? "relative w-full h-full"

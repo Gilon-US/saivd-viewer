@@ -185,6 +185,45 @@ describe('VideoPlayer', () => {
   it('has proper accessibility attributes', () => {
     render(<VideoPlayer {...defaultProps} />);
     expect(screen.getByLabelText('Close video player')).toBeInTheDocument();
+    expect(screen.getByLabelText('Play')).toBeInTheDocument();
+    expect(screen.getByLabelText('Mute')).toBeInTheDocument();
+    expect(screen.getByLabelText('Fullscreen')).toBeInTheDocument();
+  });
+
+  it('handles fullscreen toggle', () => {
+    render(<VideoPlayer {...defaultProps} />);
+
+    const video = document.querySelector('video') as HTMLVideoElement;
+    const stage = video.parentElement as HTMLDivElement;
+    const fullscreenButton = screen.getByLabelText('Fullscreen');
+
+    stage.requestFullscreen = jest.fn();
+    document.exitFullscreen = jest.fn();
+
+    fireEvent.click(fullscreenButton);
+    expect(stage.requestFullscreen).toHaveBeenCalled();
+
+    Object.defineProperty(document, 'fullscreenElement', {value: stage, writable: true});
+    fireEvent.click(fullscreenButton);
+    expect(document.exitFullscreen).toHaveBeenCalled();
+  });
+
+  it('does not fullscreen stage container when ssrVideo', () => {
+    render(
+      <VideoPlayer
+        {...defaultProps}
+        ssrVideo
+        playbackContext="public"
+        videoId="vid-1"
+      />,
+    );
+
+    const stage = document.querySelector('[data-video-stage]') as HTMLDivElement;
+    stage.requestFullscreen = jest.fn();
+
+    fireEvent.click(screen.getByLabelText('Fullscreen'));
+
+    expect(stage.requestFullscreen).not.toHaveBeenCalled();
   });
 
   it('calls useWatermarkVerification when verificationEnabled', () => {
