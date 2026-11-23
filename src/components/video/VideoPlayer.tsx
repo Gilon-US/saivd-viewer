@@ -2,7 +2,12 @@
 
 import {useEffect, useLayoutEffect, useRef, useState} from "react";
 import {X, Play, Pause, Volume2, VolumeX, Maximize} from "lucide-react";
-import {useWatermarkVerification, type VerificationProgress, type VerificationProgressPhase} from "@/hooks/useWatermarkVerification";
+import {
+  useWatermarkVerification,
+  type VerificationDebugEvent,
+  type VerificationProgress,
+  type VerificationProgressPhase,
+} from "@/hooks/useWatermarkVerification";
 import {LoadingSpinner} from "@/components/ui/loading-spinner";
 import {PresentationQrFlipButton} from "@/components/presentation/PresentationQrFlipButton";
 import {useCreatorQrOverlayPosition} from "@/hooks/useCreatorQrOverlayPosition";
@@ -27,6 +32,10 @@ interface VideoPlayerProps {
   ssrVideo?: boolean;
   playbackContext?: PlaybackContext;
   contentLengthBytes?: number | null;
+  /** /testing page only: verification diagnostics. */
+  onDebugEvent?: (event: VerificationDebugEvent) => void;
+  /** /testing page only: verify with this PEM instead of the creator's key from the SAIVD API. */
+  publicKeyPemOverride?: string | null;
 }
 
 export function VideoPlayer({
@@ -42,6 +51,8 @@ export function VideoPlayer({
   ssrVideo = false,
   playbackContext = "public",
   contentLengthBytes = null,
+  onDebugEvent,
+  publicKeyPemOverride,
 }: VideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
@@ -73,6 +84,8 @@ export function VideoPlayer({
     videoId,
     onVerificationComplete,
     onVerificationProgress: setVerificationProgress,
+    onDebugEvent,
+    publicKeyPemOverride,
   });
 
   const playbackPlan = getVideoElementPlaybackPlan({
