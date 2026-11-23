@@ -3,7 +3,8 @@
 import { FFmpeg } from "@ffmpeg/ffmpeg";
 import { createFile } from "mp4box";
 import type { ISOFile, Movie, MP4BoxBuffer, Sample } from "mp4box";
-import { extractYLumaFromYuv420pRaw } from "./yuv420-luma-extract";
+import { extractYLumaFromYuv420pRaw, extractYuv420pPlanes } from "./yuv420-luma-extract";
+import { avccToAnnexB, concatUint8, getAvcCAnnexBPrefix } from "./mp4-annexb";
 import { getFfmpegCoreUrls } from "./ffmpeg-verification-assets";
 
 const RANGE_STEPS_BYTES_LEGACY = [8 * 1024 * 1024, 16 * 1024 * 1024, 32 * 1024 * 1024];
@@ -11,8 +12,11 @@ const RANGE_STEPS_BYTES_LEGACY = [8 * 1024 * 1024, 16 * 1024 * 1024, 32 * 1024 *
 type WorkerRequest =
   | { id: number; type: "init"; videoUrl: string; baseUrl: string; moovRangeSteps?: number[] }
   | { id: number; type: "loadFfmpeg"; baseUrl: string }
-  | { id: number; type: "decodeFrame"; frameIndex: number }
+  | { id: number; type: "decodeFrame"; frameIndex: number; planes?: "y" | "yuv" }
   | { id: number; type: "dispose" };
+
+/** A sync sample (IDR keyframe): its index in the track and its presentation time in seconds. */
+type KeyframeInfo = { index: number; time: number };
 
 type WorkerResponse =
   | {
@@ -23,12 +27,16 @@ type WorkerResponse =
       nbSamples: number;
       width: number;
       height: number;
+      keyframes: KeyframeInfo[];
     }
   | {
       id: number;
       ok: true;
       type: "decodeFrame";
       yPlane: ArrayBuffer;
+      /** Present when the request asked for planes: "yuv" (watermark format v3). */
+      uPlane?: ArrayBuffer;
+      vPlane?: ArrayBuffer;
       width: number;
       height: number;
     }
@@ -79,80 +87,6 @@ async function fetchByteRange(url: string, start: number, end: number, signal: A
   } catch {
     return null;
   }
-}
-
-function avccToAnnexB(data: Uint8Array): Uint8Array {
-  const chunks: Uint8Array[] = [];
-  let pos = 0;
-  const startCode = new Uint8Array([0, 0, 0, 1]);
-  while (pos + 4 <= data.length) {
-    const len = (data[pos] << 24) | (data[pos + 1] << 16) | (data[pos + 2] << 8) | data[pos + 3];
-    pos += 4;
-    if (len <= 0 || pos + len > data.length) break;
-    const nal = data.subarray(pos, pos + len);
-    const merged = new Uint8Array(startCode.length + nal.length);
-    merged.set(startCode);
-    merged.set(nal, startCode.length);
-    chunks.push(merged);
-    pos += len;
-  }
-  const total = chunks.reduce((s, c) => s + c.length, 0);
-  const out = new Uint8Array(total);
-  let o = 0;
-  for (const c of chunks) {
-    out.set(c, o);
-    o += c.length;
-  }
-  return out;
-}
-
-type AvcCBoxLike = {
-  SPS?: Array<{length?: number; data?: Uint8Array}>;
-  PPS?: Array<{length?: number; data?: Uint8Array}>;
-};
-
-function getAvcCAnnexBPrefix(iso: ISOFile, trackId: number): Uint8Array | null {
-  const trak = iso.getTrackById(trackId) as {
-    mdia?: {minf?: {stbl?: {stsd?: {entries?: Array<{avcC?: AvcCBoxLike}>}}}};
-  } | null;
-  const avcC = trak?.mdia?.minf?.stbl?.stsd?.entries?.[0]?.avcC;
-  if (!avcC) return null;
-  const startCode = new Uint8Array([0, 0, 0, 1]);
-  const chunks: Uint8Array[] = [];
-  for (const s of avcC.SPS ?? []) {
-    const d = s?.data;
-    if (d?.length) {
-      const m = new Uint8Array(4 + d.length);
-      m.set(startCode);
-      m.set(d, 4);
-      chunks.push(m);
-    }
-  }
-  for (const p of avcC.PPS ?? []) {
-    const d = p?.data;
-    if (d?.length) {
-      const m = new Uint8Array(4 + d.length);
-      m.set(startCode);
-      m.set(d, 4);
-      chunks.push(m);
-    }
-  }
-  if (chunks.length === 0) return null;
-  const total = chunks.reduce((a, c) => a + c.length, 0);
-  const out = new Uint8Array(total);
-  let o = 0;
-  for (const c of chunks) {
-    out.set(c, o);
-    o += c.length;
-  }
-  return out;
-}
-
-function concatUint8(a: Uint8Array, b: Uint8Array): Uint8Array {
-  const o = new Uint8Array(a.length + b.length);
-  o.set(a);
-  o.set(b, a.length);
-  return o;
 }
 
 async function ensureMoovParsed(url: string, signal: AbortSignal, rangeSteps: number[]): Promise<Movie> {
@@ -208,7 +142,8 @@ async function ensureSampleData(trackId: number, sampleIndex: number, signal: Ab
   return sample as Sample;
 }
 
-async function decodeFrameToY(frameIndex: number, signal: AbortSignal): Promise<{yPlane: Uint8Array; width: number; height: number}> {
+/** Decode one sample to a raw yuv420p buffer (FFmpeg `rawvideo`, possibly with row padding). */
+async function decodeFrameToRawYuv(frameIndex: number, signal: AbortSignal): Promise<Uint8Array> {
   const ff = await ensureFfmpegLoaded(baseUrlForFfmpeg);
   const sample = await ensureSampleData(videoTrackId, frameIndex, signal);
   const sampleAnnexB = avccToAnnexB(sample.data!);
@@ -255,14 +190,35 @@ async function decodeFrameToY(frameIndex: number, signal: AbortSignal): Promise<
   } else {
     full = new Uint8Array(raw as ArrayBuffer);
   }
-  const yPlane = extractYLumaFromYuv420pRaw(full, videoWidth, videoHeight);
   try {
     await ff.deleteFile("in.h264");
     await ff.deleteFile("out.yuv");
   } catch {
     // ignore
   }
+  return full;
+}
+
+async function decodeFrameToY(frameIndex: number, signal: AbortSignal): Promise<{yPlane: Uint8Array; width: number; height: number}> {
+  const full = await decodeFrameToRawYuv(frameIndex, signal);
+  const yPlane = extractYLumaFromYuv420pRaw(full, videoWidth, videoHeight);
   return {yPlane, width: videoWidth, height: videoHeight};
+}
+
+/** Keyframes (sync samples) with presentation times, for keyframe-based verification. */
+function listKeyframes(trackId: number): KeyframeInfo[] {
+  const trak = mp4boxfile?.getTrackById(trackId) as {samples?: Sample[]} | null | undefined;
+  const out: KeyframeInfo[] = [];
+  for (const [index, s] of (trak?.samples ?? []).entries()) {
+    if (s.is_sync && s.timescale > 0) {
+      out.push({index, time: s.cts / s.timescale});
+    }
+  }
+  return out;
+}
+
+function toTransferable(plane: Uint8Array): ArrayBuffer {
+  return plane.buffer.slice(plane.byteOffset, plane.byteOffset + plane.byteLength) as ArrayBuffer;
 }
 
 function resetDemuxSession() {
@@ -348,6 +304,7 @@ self.onmessage = async (ev: MessageEvent<WorkerRequest>) => {
         nbSamples,
         width: videoWidth,
         height: videoHeight,
+        keyframes: listKeyframes(videoTrackId),
       };
       self.postMessage(r);
       return;
@@ -360,6 +317,25 @@ self.onmessage = async (ev: MessageEvent<WorkerRequest>) => {
       const signal = abortController?.signal ?? new AbortController().signal;
       if (msg.frameIndex < 0 || msg.frameIndex >= nbSamples) {
         throw new Error(`frameIndex ${msg.frameIndex} out of range (nbSamples=${nbSamples})`);
+      }
+      if (msg.planes === "yuv") {
+        const full = await decodeFrameToRawYuv(msg.frameIndex, signal);
+        const planes = extractYuv420pPlanes(full, videoWidth, videoHeight);
+        const yBuf = toTransferable(planes.y);
+        const uBuf = toTransferable(planes.u);
+        const vBuf = toTransferable(planes.v);
+        const r: WorkerResponse = {
+          id: msg.id,
+          ok: true,
+          type: "decodeFrame",
+          yPlane: yBuf,
+          uPlane: uBuf,
+          vPlane: vBuf,
+          width: videoWidth,
+          height: videoHeight,
+        };
+        self.postMessage(r, [yBuf, uBuf, vBuf]);
+        return;
       }
       const {yPlane, width, height} = await decodeFrameToY(msg.frameIndex, signal);
       const buf = yPlane.buffer.slice(yPlane.byteOffset, yPlane.byteOffset + yPlane.byteLength) as ArrayBuffer;

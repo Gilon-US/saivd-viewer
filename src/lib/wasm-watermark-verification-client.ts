@@ -1,5 +1,5 @@
 /**
- * Lazy-loaded Web Worker + ffmpeg.wasm for watermark verification (Y plane) only.
+ * Lazy-loaded Web Worker + ffmpeg.wasm for watermark verification (Y plane, or Y/U/V for format v3).
  * Sessions are stateful per videoUrl; worker + ffmpeg stay warm across videos in-tab.
  */
 
@@ -9,6 +9,26 @@ export type WasmFrameYResult = {
   yPlane: Uint8Array;
   width: number;
   height: number;
+};
+
+/** All three packed planes of one decoded frame (watermark format v3). */
+export type WasmFrameYuvResult = {
+  y: Uint8Array;
+  u: Uint8Array;
+  v: Uint8Array;
+  width: number;
+  height: number;
+};
+
+/** A sync sample (IDR keyframe): track sample index and presentation time in seconds. */
+export type WasmKeyframe = {index: number; time: number};
+
+/** Video track facts read from the MP4 moov (exact; no fps estimate). */
+export type WasmVideoTrackInfo = {
+  nbSamples: number;
+  width: number;
+  height: number;
+  keyframes: WasmKeyframe[];
 };
 
 /** Keep worker/ffmpeg warm between player closes (tab lifetime disposal on beforeunload). */
@@ -22,6 +42,7 @@ type InitOk = {
   nbSamples: number;
   width: number;
   height: number;
+  keyframes?: WasmKeyframe[];
 };
 
 type LoadFfmpegOk = {
@@ -35,6 +56,8 @@ type DecodeOk = {
   ok: true;
   type: "decodeFrame";
   yPlane: ArrayBuffer;
+  uPlane?: ArrayBuffer;
+  vPlane?: ArrayBuffer;
   width: number;
   height: number;
 };
@@ -51,7 +74,7 @@ const pending = new Map<
 >();
 
 let activeUrl: string | null = null;
-let initMeta: {nbSamples: number; width: number; height: number} | null = null;
+let initMeta: WasmVideoTrackInfo | null = null;
 let disposeTimer: ReturnType<typeof setTimeout> | null = null;
 let ffmpegPrewarmPromise: Promise<void> | null = null;
 let beforeUnloadRegistered = false;
@@ -136,7 +159,7 @@ function send<T extends OkMsg>(payload: Record<string, unknown>): Promise<T> {
 
 async function runEnsureWasmVerificationSessionLocked(
   videoUrl: string
-): Promise<{nbSamples: number; width: number; height: number} | null> {
+): Promise<WasmVideoTrackInfo | null> {
   if (activeUrl === videoUrl && initMeta) {
     return initMeta;
   }
@@ -147,6 +170,7 @@ async function runEnsureWasmVerificationSessionLocked(
       nbSamples: data.nbSamples,
       width: data.width,
       height: data.height,
+      keyframes: data.keyframes ?? [],
     };
     return initMeta;
   };
@@ -189,7 +213,7 @@ export async function prewarmFfmpegInWorker(): Promise<void> {
 
 export async function ensureWasmVerificationSession(
   videoUrl: string
-): Promise<{nbSamples: number; width: number; height: number} | null> {
+): Promise<WasmVideoTrackInfo | null> {
   if (disposeTimer) {
     clearTimeout(disposeTimer);
     disposeTimer = null;
@@ -233,6 +257,37 @@ export async function getFrameYFromWasm(
   });
   return {
     yPlane: new Uint8Array(data.yPlane),
+    width: data.width,
+    height: data.height,
+  };
+}
+
+/** Track info (sample count, size, keyframes) for the video; initializes the session if needed. */
+export async function getWasmVideoTrackInfo(videoUrl: string): Promise<WasmVideoTrackInfo | null> {
+  return ensureWasmVerificationSession(videoUrl);
+}
+
+/** Decode one sample and return packed Y, U and V planes (watermark format v3). */
+export async function getFrameYuvFromWasm(
+  videoUrl: string,
+  frameIndex: number
+): Promise<WasmFrameYuvResult | null> {
+  const meta = await ensureWasmVerificationSession(videoUrl);
+  if (!meta || frameIndex < 0 || frameIndex >= meta.nbSamples) {
+    return null;
+  }
+  const data = await send<DecodeOk>({
+    type: "decodeFrame",
+    frameIndex,
+    planes: "yuv",
+  });
+  if (!data.uPlane || !data.vPlane) {
+    throw new Error("Worker returned no chroma planes");
+  }
+  return {
+    y: new Uint8Array(data.yPlane),
+    u: new Uint8Array(data.uPlane),
+    v: new Uint8Array(data.vPlane),
     width: data.width,
     height: data.height,
   };
